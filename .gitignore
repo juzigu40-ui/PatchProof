@@ -4,7 +4,6 @@ dist/
 !packages/github-action/dist/**
 coverage/
 audit/
-.patchproof/worktrees/
-.patchproof/tmp/
+.patchproof/
 .DS_Store
 *.log
