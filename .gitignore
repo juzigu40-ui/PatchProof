@@ -1,0 +1,9 @@
+node_modules/
+dist/
+!packages/github-action/dist/
+!packages/github-action/dist/**
+coverage/
+.patchproof/worktrees/
+.patchproof/tmp/
+.DS_Store
+*.log

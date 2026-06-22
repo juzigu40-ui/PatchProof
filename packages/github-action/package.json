@@ -1,0 +1,27 @@
+{
+  "name": "@patchproof/github-action",
+  "version": "0.1.0",
+  "description": "PatchProof GitHub Action wrapper.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "action.yml"
+  ],
+  "scripts": {
+    "build": "tsup --config tsup.config.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@patchproof/adapters-node": "workspace:*",
+    "@patchproof/adapters-python": "workspace:*",
+    "@patchproof/config": "workspace:*",
+    "@patchproof/core": "workspace:*"
+  }
+}

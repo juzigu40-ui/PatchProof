@@ -1,0 +1,30 @@
+{
+  "name": "@patchproof/cli",
+  "version": "0.1.0",
+  "description": "PatchProof command-line interface.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "patchproof": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup src/bin.ts src/index.ts --format esm --dts --clean",
+    "dev": "tsx src/bin.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@patchproof/adapters-node": "workspace:*",
+    "@patchproof/adapters-python": "workspace:*",
+    "@patchproof/config": "workspace:*",
+    "@patchproof/core": "workspace:*"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@patchproof/adapters-node": ["packages/adapters-node/src/index.ts"],
+      "@patchproof/adapters-python": ["packages/adapters-python/src/index.ts"],
+      "@patchproof/codex": ["packages/codex/src/index.ts"],
+      "@patchproof/config": ["packages/config/src/index.ts"],
+      "@patchproof/core": ["packages/core/src/index.ts"],
+      "@patchproof/github-action": ["packages/github-action/src/index.ts"],
+      "@patchproof/runner": ["packages/runner/src/index.ts"]
+    }
+  },
+  "include": ["apps/**/*.ts", "packages/**/*.ts", "vitest.config.ts", "eslint.config.js"]
+}
