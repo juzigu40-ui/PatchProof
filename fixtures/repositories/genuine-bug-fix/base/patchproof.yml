@@ -1,0 +1,12 @@
+version: 1
+commands:
+  reproduce:
+    run: node reproduce.js
+    expected_exit_code:
+      base: 1
+      head: 0
+  test:
+    run: node test.js
+risk:
+  public_api_files:
+    - math.js

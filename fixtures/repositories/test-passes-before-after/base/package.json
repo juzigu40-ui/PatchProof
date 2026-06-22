@@ -1,0 +1,9 @@
+{
+  "name": "fixture-test-passes-before-after",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "reproduce": "node reproduce.js",
+    "test": "node test.js"
+  }
+}
