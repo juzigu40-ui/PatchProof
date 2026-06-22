@@ -3,6 +3,7 @@ dist/
 !packages/github-action/dist/
 !packages/github-action/dist/**
 coverage/
+audit/
 .patchproof/worktrees/
 .patchproof/tmp/
 .DS_Store

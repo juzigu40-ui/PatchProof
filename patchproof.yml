@@ -1,0 +1,17 @@
+version: 1
+commands:
+  reproduce:
+    run: node -e "process.exit(0)"
+    expected_exit_code:
+      base: 0
+      head: 0
+  test:
+    run: node -e "process.exit(0)"
+risk:
+  dependency_files:
+    - package.json
+    - pnpm-lock.yaml
+  public_api_files:
+    - apps/cli/src/index.ts
+    - packages/core/src/index.ts
+    - packages/github-action/action.yml

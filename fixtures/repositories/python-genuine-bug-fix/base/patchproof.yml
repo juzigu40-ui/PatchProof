@@ -1,0 +1,12 @@
+version: 1
+commands:
+  reproduce:
+    run: python3 reproduce.py
+    expected_exit_code:
+      base: 1
+      head: 0
+  test:
+    run: python3 test_calculator.py
+risk:
+  public_api_files:
+    - calculator.py

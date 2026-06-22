@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { nodeAdapter } from "@patchproof/adapters-node";
+import { pythonAdapter } from "@patchproof/adapters-python";
 import { loadPatchProofConfig } from "@patchproof/config";
 import { loadProof, VerificationRuntimeError, verifyPatchProof } from "./verify.js";
 
@@ -90,6 +91,25 @@ describe("verifyPatchProof", () => {
     expect(result.exitCode).toBe(0);
     expect(result.proof.determinations.dependency_files_changed).toBe(true);
     expect(result.proof.changed_files.dependency).toEqual(["package.json"]);
+    await rm(repo.path, { recursive: true, force: true });
+  });
+
+  it("verifies a Python bug fix with the Python adapter", async () => {
+    const repo = await createFixtureRepository("python-genuine-bug-fix");
+    const loaded = await loadPatchProofConfig(repo.path);
+
+    const result = await verifyPatchProof({
+      adapters: [pythonAdapter],
+      baseRef: repo.baseSha,
+      config: loaded.config,
+      configPath: loaded.path,
+      headRef: repo.headSha,
+      repoPath: repo.path
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.proof.adapters).toEqual(["python"]);
+    expect(result.proof.determinations.public_api_files_changed).toBe(true);
     await rm(repo.path, { recursive: true, force: true });
   });
 });
