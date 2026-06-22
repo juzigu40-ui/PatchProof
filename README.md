@@ -21,8 +21,9 @@ patchproof report --format json
 patchproof report --format markdown
 ```
 
-`verify` reads `patchproof.yml`, creates isolated git worktrees for the base and head refs, executes
-the configured reproduction and test commands with timeouts, and writes:
+`verify` reads the trusted base commit's `patchproof.yml`, creates isolated git worktrees for the
+base reproduction, head reproduction, and head test phases, executes the configured commands with
+timeouts, and writes:
 
 - `.patchproof/proof.json`
 - `.patchproof/proof.md`

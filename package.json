@@ -11,7 +11,8 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test:coverage && pnpm build",
+    "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test:coverage && pnpm build && pnpm check:action-dist",
+    "check:action-dist": "git diff --exit-code -- packages/github-action/dist",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",

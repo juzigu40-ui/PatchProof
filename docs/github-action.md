@@ -2,7 +2,8 @@
 
 PatchProof verification should run on `pull_request`, not `pull_request_target`. The verification
 job requires only `contents: read` and must not receive secrets, because configured commands execute
-pull request code.
+pull request code. Use GitHub-hosted runners for untrusted pull requests; persistent self-hosted
+runners can retain attacker-controlled state after a job ends.
 
 ```yaml
 name: PatchProof
@@ -18,12 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           cache: pnpm
@@ -40,6 +41,9 @@ jobs:
 
 Do not interpolate pull request titles or bodies into shell scripts. The action produces GitHub
 Check output through its normal logs and step summary, and it does not post comments by default.
+PatchProof reads `patchproof.yml` from the base commit for the current verdict and records the
+trusted config blob SHA in `proof.json`; policy edits in the pull request are reported as
+`policy_changed`.
 
 ## Optional summary job
 
