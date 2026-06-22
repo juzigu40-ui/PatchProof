@@ -59,12 +59,12 @@ function nonEmpty(value: string | undefined): string | undefined {
   return value && value.length > 0 ? value : undefined;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  try {
-    process.exitCode = await runAction();
-  } catch (error) {
+void runAction()
+  .then((exitCode) => {
+    process.exitCode = exitCode;
+  })
+  .catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`${message}\n`);
     process.exitCode = 2;
-  }
-}
+  });
