@@ -15,6 +15,8 @@ export const CommandEvidenceSchema = z
     stdout_truncated: z.boolean(),
     stderr_truncated: z.boolean(),
     timed_out: z.boolean(),
+    infrastructure_error: z.boolean(),
+    infrastructure_error_reason: z.string().nullable(),
     passed: z.boolean()
   })
   .strict();
@@ -31,6 +33,15 @@ export const ProofSchema = z
         head_ref: z.string(),
         base_sha: z.string(),
         head_sha: z.string()
+      })
+      .strict(),
+    config: z
+      .object({
+        path: z.string(),
+        source_ref: z.string(),
+        source_sha: z.string(),
+        blob_sha: z.string(),
+        policy_changed: z.boolean()
       })
       .strict(),
     config_path: z.string(),
@@ -69,7 +80,9 @@ export const ProofSchema = z
         fixed_on_head: z.boolean(),
         tests_passed: z.boolean(),
         dependency_files_changed: z.boolean(),
-        public_api_files_changed: z.boolean()
+        public_api_files_changed: z.boolean(),
+        policy_changed: z.boolean(),
+        infrastructure_error: z.boolean()
       })
       .strict(),
     verdict: z

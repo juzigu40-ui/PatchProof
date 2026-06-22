@@ -3995,10 +3995,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep: sep2, value } = collItem;
+        const { start, key, sep: sep3, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep2?.[0],
+          next: key ?? sep3?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -4012,7 +4012,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep2) {
+          if (!keyProps.anchor && !keyProps.tag && !sep3) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map.comment)
@@ -4036,7 +4036,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep2 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep3 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -4052,7 +4052,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep2, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep3, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -4143,7 +4143,7 @@ var require_resolve_end = __commonJS({
       let comment = "";
       if (end) {
         let hasSpace = false;
-        let sep2 = "";
+        let sep3 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -4157,13 +4157,13 @@ var require_resolve_end = __commonJS({
               if (!comment)
                 comment = cb;
               else
-                comment += sep2 + cb;
-              sep2 = "";
+                comment += sep3 + cb;
+              sep3 = "";
               break;
             }
             case "newline":
               if (comment)
-                sep2 += source;
+                sep3 += source;
               hasSpace = true;
               break;
             default:
@@ -4206,18 +4206,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep: sep2, value } = collItem;
+        const { start, key, sep: sep3, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep2?.[0],
+          next: key ?? sep3?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep2 && !value) {
+          if (!props.anchor && !props.tag && !sep3 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -4271,8 +4271,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep2 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep2, null, props, onError);
+        if (!isMap && !sep3 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep3, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -4284,7 +4284,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep2 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep3 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -4295,8 +4295,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep2)
-                for (const st of sep2) {
+              if (sep3)
+                for (const st of sep3) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -4313,7 +4313,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep2, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep3, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4493,7 +4493,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep2 = "";
+      let sep3 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -4510,24 +4510,24 @@ var require_resolve_block_scalar = __commonJS({
           indent = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep2 + indent.slice(trimIndent) + content;
-          sep2 = "\n";
+          value += sep3 + indent.slice(trimIndent) + content;
+          sep3 = "\n";
         } else if (indent.length > trimIndent || content[0] === "	") {
-          if (sep2 === " ")
-            sep2 = "\n";
-          else if (!prevMoreIndented && sep2 === "\n")
-            sep2 = "\n\n";
-          value += sep2 + indent.slice(trimIndent) + content;
-          sep2 = "\n";
+          if (sep3 === " ")
+            sep3 = "\n";
+          else if (!prevMoreIndented && sep3 === "\n")
+            sep3 = "\n\n";
+          value += sep3 + indent.slice(trimIndent) + content;
+          sep3 = "\n";
           prevMoreIndented = true;
         } else if (content === "") {
-          if (sep2 === "\n")
+          if (sep3 === "\n")
             value += "\n";
           else
-            sep2 = "\n";
+            sep3 = "\n";
         } else {
-          value += sep2 + content;
-          sep2 = " ";
+          value += sep3 + content;
+          sep3 = " ";
           prevMoreIndented = false;
         }
       }
@@ -4709,25 +4709,25 @@ var require_resolve_flow_scalar = __commonJS({
       if (!match2)
         return source;
       let res = match2[1];
-      let sep2 = " ";
+      let sep3 = " ";
       let pos = first.lastIndex;
       line.lastIndex = pos;
       while (match2 = line.exec(source)) {
         if (match2[1] === "") {
-          if (sep2 === "\n")
-            res += sep2;
+          if (sep3 === "\n")
+            res += sep3;
           else
-            sep2 = "\n";
+            sep3 = "\n";
         } else {
-          res += sep2 + match2[1];
-          sep2 = " ";
+          res += sep3 + match2[1];
+          sep3 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match2 = last.exec(source);
-      return res + sep2 + (match2?.[1] ?? "");
+      return res + sep3 + (match2?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -5537,14 +5537,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep: sep2, value }) {
+    function stringifyItem({ start, key, sep: sep3, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep2)
-        for (const st of sep2)
+      if (sep3)
+        for (const st of sep3)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -6711,18 +6711,18 @@ var require_parser = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep2;
+          let sep3;
           if (scalar.end) {
-            sep2 = scalar.end;
-            sep2.push(this.sourceToken);
+            sep3 = scalar.end;
+            sep3.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep2 = [this.sourceToken];
+            sep3 = [this.sourceToken];
           const map = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep: sep2 }]
+            items: [{ start, key: scalar, sep: sep3 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -6875,15 +6875,15 @@ var require_parser = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep2 = it.sep;
-                  sep2.push(this.sourceToken);
+                  const sep3 = it.sep;
+                  sep3.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep: sep2 }]
+                    items: [{ start: start2, key, sep: sep3 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -7077,13 +7077,13 @@ var require_parser = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep2 = fc.end.splice(1, fc.end.length);
-            sep2.push(this.sourceToken);
+            const sep3 = fc.end.splice(1, fc.end.length);
+            sep3.push(this.sourceToken);
             const map = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep2 }]
+              items: [{ start, key: fc, sep: sep3 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map;
@@ -7434,8 +7434,10 @@ var pythonAdapter = {
 };
 
 // ../config/src/index.ts
+var import_node_child_process = require("child_process");
 var import_promises3 = require("fs/promises");
 var import_node_path3 = require("path");
+var import_node_util = require("util");
 var import_yaml = __toESM(require_dist(), 1);
 
 // ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/external.js
@@ -11480,6 +11482,7 @@ var coerce = {
 var NEVER = INVALID;
 
 // ../config/src/index.ts
+var execFileAsync = (0, import_node_util.promisify)(import_node_child_process.execFile);
 var exitCodeSchema = external_exports.number().int().min(0).max(255);
 var PatchProofConfigSchema = external_exports.object({
   version: external_exports.literal(1),
@@ -11502,7 +11505,7 @@ var PatchProofConfigSchema = external_exports.object({
     limit_bytes: external_exports.number().int().min(1024).max(1e7).default(1e6)
   }).strict().default({}),
   runtime: external_exports.object({
-    env_passthrough: external_exports.array(external_exports.string().regex(/^[A-Z_][A-Z0-9_]*$/)).default([])
+    env_passthrough: external_exports.array(external_exports.string().regex(/^[A-Z_][A-Z0-9_]*$/)).max(0, "env_passthrough is disabled for untrusted verification").default([])
   }).strict().default({}),
   risk: external_exports.object({
     dependency_files: external_exports.array(external_exports.string().trim().min(1)).default([]),
@@ -11522,14 +11525,7 @@ var ConfigError = class extends Error {
   originalError;
 };
 var DEFAULT_CONFIG_FILE = "patchproof.yml";
-async function loadPatchProofConfig(cwd, configPath = DEFAULT_CONFIG_FILE) {
-  const absolutePath = (0, import_node_path3.resolve)(cwd, configPath);
-  let raw;
-  try {
-    raw = await (0, import_promises3.readFile)(absolutePath, "utf8");
-  } catch (error) {
-    throw new ConfigError(`Could not read ${configPath}`, error);
-  }
+function parsePatchProofConfig(raw, configPath = DEFAULT_CONFIG_FILE) {
   let parsed;
   try {
     parsed = (0, import_yaml.parse)(raw);
@@ -11540,10 +11536,56 @@ async function loadPatchProofConfig(cwd, configPath = DEFAULT_CONFIG_FILE) {
   if (!result.success) {
     throw new ConfigError(`Invalid ${configPath}: ${result.error.message}`, result.error);
   }
-  return {
-    config: result.data,
-    path: absolutePath
-  };
+  return result.data;
+}
+async function loadPatchProofConfigFromGit(repoPath, ref, configPath = DEFAULT_CONFIG_FILE) {
+  const safePath = normalizeRelativeConfigPath(configPath);
+  try {
+    const sourceSha = (await execFileAsync("git", ["rev-parse", "--verify", `${ref}^{commit}`], {
+      cwd: repoPath
+    })).stdout.toString().trim();
+    const raw = (await execFileAsync("git", ["show", `${sourceSha}:${safePath}`], {
+      cwd: repoPath,
+      maxBuffer: 10 * 1024 * 1024
+    })).stdout.toString();
+    const blobSha = await getGitBlobSha(repoPath, sourceSha, safePath);
+    return {
+      blobSha,
+      config: parsePatchProofConfig(raw, safePath),
+      path: safePath,
+      sourceRef: ref,
+      sourceSha
+    };
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      throw error;
+    }
+    throw new ConfigError(`Could not read trusted ${safePath} from ${ref}`, error);
+  }
+}
+async function getGitBlobSha(repoPath, ref, configPath = DEFAULT_CONFIG_FILE) {
+  const safePath = normalizeRelativeConfigPath(configPath);
+  const { stdout } = await execFileAsync("git", ["rev-parse", `${ref}:${safePath}`], {
+    cwd: repoPath
+  });
+  return stdout.toString().trim();
+}
+async function tryGetGitBlobSha(repoPath, ref, configPath = DEFAULT_CONFIG_FILE) {
+  try {
+    return await getGitBlobSha(repoPath, ref, configPath);
+  } catch {
+    return null;
+  }
+}
+function normalizeRelativeConfigPath(configPath) {
+  if ((0, import_node_path3.isAbsolute)(configPath)) {
+    throw new ConfigError("Config path must be relative");
+  }
+  const normalized = (0, import_node_path3.normalize)(configPath);
+  if (normalized === ".." || normalized.startsWith(`..${import_node_path3.sep}`)) {
+    throw new ConfigError("Config path must stay inside the repository");
+  }
+  return normalized.replaceAll("\\", "/");
 }
 
 // ../core/src/schema.ts
@@ -11561,6 +11603,8 @@ var CommandEvidenceSchema = external_exports.object({
   stdout_truncated: external_exports.boolean(),
   stderr_truncated: external_exports.boolean(),
   timed_out: external_exports.boolean(),
+  infrastructure_error: external_exports.boolean(),
+  infrastructure_error_reason: external_exports.string().nullable(),
   passed: external_exports.boolean()
 }).strict();
 var ProofSchema = external_exports.object({
@@ -11573,6 +11617,13 @@ var ProofSchema = external_exports.object({
     head_ref: external_exports.string(),
     base_sha: external_exports.string(),
     head_sha: external_exports.string()
+  }).strict(),
+  config: external_exports.object({
+    path: external_exports.string(),
+    source_ref: external_exports.string(),
+    source_sha: external_exports.string(),
+    blob_sha: external_exports.string(),
+    policy_changed: external_exports.boolean()
   }).strict(),
   config_path: external_exports.string(),
   environment: external_exports.object({
@@ -11599,7 +11650,9 @@ var ProofSchema = external_exports.object({
     fixed_on_head: external_exports.boolean(),
     tests_passed: external_exports.boolean(),
     dependency_files_changed: external_exports.boolean(),
-    public_api_files_changed: external_exports.boolean()
+    public_api_files_changed: external_exports.boolean(),
+    policy_changed: external_exports.boolean(),
+    infrastructure_error: external_exports.boolean()
   }).strict(),
   verdict: external_exports.object({
     status: external_exports.enum(["verified", "failed"]),
@@ -11636,6 +11689,8 @@ function renderMarkdownReport(proof) {
     `- tests_passed: ${validProof.determinations.tests_passed}`,
     `- dependency_files_changed: ${validProof.determinations.dependency_files_changed}`,
     `- public_api_files_changed: ${validProof.determinations.public_api_files_changed}`,
+    `- policy_changed: ${validProof.determinations.policy_changed}`,
+    `- infrastructure_error: ${validProof.determinations.infrastructure_error}`,
     "",
     "## Repository",
     "",
@@ -11643,6 +11698,14 @@ function renderMarkdownReport(proof) {
     `- base_sha: ${validProof.repository.base_sha}`,
     `- head_ref: ${validProof.repository.head_ref}`,
     `- head_sha: ${validProof.repository.head_sha}`,
+    "",
+    "## Config",
+    "",
+    `- path: ${validProof.config.path}`,
+    `- source_ref: ${validProof.config.source_ref}`,
+    `- source_sha: ${validProof.config.source_sha}`,
+    `- blob_sha: ${validProof.config.blob_sha}`,
+    `- policy_changed: ${validProof.config.policy_changed}`,
     "",
     "## Commands",
     "",
@@ -11670,6 +11733,8 @@ function commandSummary(label, command) {
     `- exit_code: ${command.exit_code ?? "null"}`,
     `- duration_ms: ${command.duration_ms}`,
     `- timed_out: ${command.timed_out}`,
+    `- infrastructure_error: ${command.infrastructure_error}`,
+    `- infrastructure_error_reason: ${command.infrastructure_error_reason ?? "null"}`,
     `- passed: ${command.passed}`,
     ""
   ].join("\n");
@@ -12731,8 +12796,8 @@ var path = {
   win32: { sep: "\\" },
   posix: { sep: "/" }
 };
-var sep = defaultPlatform === "win32" ? path.win32.sep : path.posix.sep;
-minimatch.sep = sep;
+var sep2 = defaultPlatform === "win32" ? path.win32.sep : path.posix.sep;
+minimatch.sep = sep2;
 var GLOBSTAR = /* @__PURE__ */ Symbol("globstar **");
 minimatch.GLOBSTAR = GLOBSTAR;
 var qmark2 = "[^/]";
@@ -13507,36 +13572,42 @@ function matchChangedFiles(files, patterns) {
 }
 
 // ../core/src/verdict.ts
-function toCommandEvidence(name, result, commitSha, expectedExitCode) {
-  const passed = !result.timedOut && result.exitCode === expectedExitCode;
+function toCommandEvidence(name, result, commitSha, expectedExitCode, options = {}) {
+  const infrastructureErrorReason = classifyInfrastructureError(result);
+  const passed = infrastructureErrorReason === null && !result.timedOut && result.exitCode === expectedExitCode;
   return {
     name,
     command: result.command,
-    cwd: result.cwd,
+    cwd: options.cwd ?? result.cwd,
     commit_sha: commitSha,
     expected_exit_code: expectedExitCode,
     exit_code: result.exitCode,
     signal: result.signal,
     duration_ms: result.durationMs,
-    stdout: result.stdout,
-    stderr: result.stderr,
+    stdout: redactText(result.stdout, [...options.redactedValues ?? [], result.cwd]),
+    stderr: redactText(result.stderr, [...options.redactedValues ?? [], result.cwd]),
     stdout_truncated: result.stdoutTruncated,
     stderr_truncated: result.stderrTruncated,
     timed_out: result.timedOut,
+    infrastructure_error: infrastructureErrorReason !== null,
+    infrastructure_error_reason: infrastructureErrorReason,
     passed
   };
 }
 function evaluateDeterminations(input) {
+  const infrastructure_error = input.baseReproduction.infrastructure_error || input.headReproduction.infrastructure_error || input.headTests.infrastructure_error;
   return {
     reproduced_on_base: input.baseReproduction.passed,
     fixed_on_head: input.headReproduction.passed,
     tests_passed: input.headTests.passed,
     dependency_files_changed: input.dependencyChangedFiles.length > 0,
-    public_api_files_changed: input.publicApiChangedFiles.length > 0
+    public_api_files_changed: input.publicApiChangedFiles.length > 0,
+    policy_changed: input.policyChanged,
+    infrastructure_error
   };
 }
 function evaluateVerdict(determinations) {
-  if (determinations.reproduced_on_base && determinations.fixed_on_head && determinations.tests_passed) {
+  if (determinations.reproduced_on_base && determinations.fixed_on_head && determinations.tests_passed && !determinations.infrastructure_error) {
     return {
       status: "verified",
       reason: "base reproduction matched, head reproduction matched, and head tests passed",
@@ -13544,6 +13615,9 @@ function evaluateVerdict(determinations) {
     };
   }
   const failed = [];
+  if (determinations.infrastructure_error) {
+    failed.push("one or more commands ended with an infrastructure error");
+  }
   if (!determinations.reproduced_on_base) {
     failed.push("base reproduction did not match the expected exit code");
   }
@@ -13562,24 +13636,59 @@ function evaluateVerdict(determinations) {
 function proofExitCode(proof) {
   return proof.verdict.exit_code;
 }
+function classifyInfrastructureError(result) {
+  const combined = `${result.stderr}
+${result.stdout}`;
+  if (result.timedOut) {
+    return "timeout";
+  }
+  if (result.signal !== null) {
+    return `signal:${result.signal}`;
+  }
+  if (result.exitCode === 126 || result.exitCode === 127) {
+    return `command_exit_${result.exitCode}`;
+  }
+  if (/MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|Cannot find module/.test(combined)) {
+    return "missing_module_or_script";
+  }
+  if (/ModuleNotFoundError|ImportError:|No module named/.test(combined)) {
+    return "missing_python_module";
+  }
+  if (/command not found|No such file or directory|ENOENT/i.test(combined)) {
+    return "missing_command_or_file";
+  }
+  return null;
+}
+function redactText(text, redactedValues) {
+  let redacted = text.replace(
+    /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9_-]{20,}|[A-Za-z0-9+/]{32,}={0,2})\b/g,
+    "[REDACTED]"
+  );
+  for (const value of redactedValues) {
+    if (value.length >= 4) {
+      redacted = redacted.split(value).join("[REDACTED]");
+    }
+  }
+  return redacted;
+}
 
 // ../core/src/verify.ts
+var import_node_crypto2 = require("crypto");
 var import_promises5 = require("fs/promises");
 var import_node_path5 = require("path");
 
 // ../runner/src/index.ts
-var import_node_child_process = require("child_process");
+var import_node_child_process2 = require("child_process");
 var import_node_crypto = require("crypto");
 var import_promises4 = require("fs/promises");
 var import_node_path4 = require("path");
-var import_node_util = require("util");
-var execFileAsync = (0, import_node_util.promisify)(import_node_child_process.execFile);
+var import_node_util2 = require("util");
+var execFileAsync2 = (0, import_node_util2.promisify)(import_node_child_process2.execFile);
 var SAFE_ENV_KEYS = /* @__PURE__ */ new Set([
   "CI",
   "FORCE_COLOR",
   "GITHUB_ACTIONS",
   "GITHUB_WORKSPACE",
-  "HOME",
   "LANG",
   "LC_ALL",
   "LOGNAME",
@@ -13593,7 +13702,9 @@ var SAFE_ENV_KEYS = /* @__PURE__ */ new Set([
   "TMPDIR",
   "USER"
 ]);
-function createCommandEnvironment(source = process.env, passthrough = []) {
+function createCommandEnvironment(source = process.env, options = []) {
+  const passthrough = isStringArray(options) ? options : options.passthrough ?? [];
+  const overrides = isStringArray(options) ? {} : options.overrides ?? {};
   const keys = /* @__PURE__ */ new Set([...SAFE_ENV_KEYS, ...passthrough]);
   const env = {};
   for (const key of keys) {
@@ -13602,27 +13713,32 @@ function createCommandEnvironment(source = process.env, passthrough = []) {
       env[key] = value;
     }
   }
-  return env;
+  return {
+    ...env,
+    ...overrides
+  };
+}
+function isStringArray(value) {
+  return Array.isArray(value);
 }
 async function runCommand(options) {
   const started = process.hrtime.bigint();
   const stdout = createLimitedCapture(options.outputLimitBytes);
   const stderr = createLimitedCapture(options.outputLimitBytes);
   return await new Promise((resolve3) => {
-    const child = (0, import_node_child_process.spawn)(options.command, {
+    const child = (0, import_node_child_process2.spawn)(options.command, {
       cwd: options.cwd,
       env: options.env ?? createCommandEnvironment(),
+      detached: process.platform !== "win32",
       shell: true,
       windowsHide: true
     });
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      killProcessTree(child.pid, "SIGTERM");
       setTimeout(() => {
-        if (!child.killed) {
-          child.kill("SIGKILL");
-        }
+        killProcessTree(child.pid, "SIGKILL");
       }, 500).unref();
     }, options.timeoutMs);
     timeout.unref();
@@ -13648,6 +13764,19 @@ async function runCommand(options) {
       });
     });
   });
+}
+function killProcessTree(pid, signal) {
+  if (pid === void 0) {
+    return;
+  }
+  try {
+    if (process.platform === "win32") {
+      process.kill(pid, signal);
+      return;
+    }
+    process.kill(-pid, signal);
+  } catch {
+  }
 }
 function createLimitedCapture(limitBytes) {
   const chunks = [];
@@ -13678,13 +13807,13 @@ function createLimitedCapture(limitBytes) {
   };
 }
 async function resolveCommit(repoPath, ref) {
-  const { stdout } = await execFileAsync("git", ["rev-parse", "--verify", `${ref}^{commit}`], {
+  const { stdout } = await execFileAsync2("git", ["rev-parse", "--verify", `${ref}^{commit}`], {
     cwd: repoPath
   });
   return stdout.trim();
 }
 async function listChangedFiles(repoPath, baseSha, headSha) {
-  const { stdout } = await execFileAsync("git", ["diff", "--name-only", baseSha, headSha], {
+  const { stdout } = await execFileAsync2("git", ["diff", "--name-only", baseSha, headSha], {
     cwd: repoPath,
     maxBuffer: 10 * 1024 * 1024
   });
@@ -13693,7 +13822,7 @@ async function listChangedFiles(repoPath, baseSha, headSha) {
 async function createWorktree(repoPath, worktreeRoot, label, ref, sha) {
   const path2 = (0, import_node_path4.join)(worktreeRoot, `${label}-${(0, import_node_crypto.randomUUID)()}`);
   await (0, import_promises4.mkdir)((0, import_node_path4.dirname)(path2), { recursive: true });
-  await execFileAsync("git", ["worktree", "add", "--detach", path2, sha], {
+  await execFileAsync2("git", ["worktree", "add", "--detach", path2, sha], {
     cwd: repoPath,
     maxBuffer: 10 * 1024 * 1024
   });
@@ -13701,7 +13830,7 @@ async function createWorktree(repoPath, worktreeRoot, label, ref, sha) {
 }
 async function removeWorktree(repoPath, worktreePath) {
   try {
-    await execFileAsync("git", ["worktree", "remove", "--force", worktreePath], {
+    await execFileAsync2("git", ["worktree", "remove", "--force", worktreePath], {
       cwd: repoPath,
       maxBuffer: 10 * 1024 * 1024
     });
@@ -13712,6 +13841,8 @@ async function removeWorktree(repoPath, worktreePath) {
 
 // ../core/src/verify.ts
 var PATCHPROOF_VERSION = "0.1.0";
+var SECRET_ENV_NAME_PATTERN = /(TOKEN|SECRET|PASSWORD|KEY|CREDENTIAL|AUTH|COOKIE|SESSION)/i;
+var SECRET_VALUE_PATTERN = /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9_-]{20,}|[A-Za-z0-9+/]{32,}={0,2})\b/;
 var VerificationRuntimeError = class extends Error {
   constructor(message, originalError) {
     super(message);
@@ -13724,69 +13855,98 @@ async function verifyPatchProof(options) {
   const repoPath = (0, import_node_path5.resolve)(options.repoPath);
   const proofDir = options.proofDir ?? (0, import_node_path5.join)(repoPath, ".patchproof");
   const worktreeRoot = (0, import_node_path5.join)(proofDir, "worktrees", `${Date.now()}-${process.pid}`);
-  let baseWorktree;
-  let headWorktree;
+  const tmpRoot = (0, import_node_path5.join)(proofDir, "tmp", `${Date.now()}-${process.pid}`);
+  const worktrees = [];
   try {
     const [baseSha, headSha] = await Promise.all([
       resolveCommit(repoPath, options.baseRef),
       resolveCommit(repoPath, options.headRef)
     ]);
+    const configPath = options.configPath ?? DEFAULT_CONFIG_FILE;
+    const loadedConfig = await loadPatchProofConfigFromGit(repoPath, baseSha, configPath);
+    const config = loadedConfig.config;
+    const headConfigBlobSha = await tryGetGitBlobSha(repoPath, headSha, configPath);
+    const policyChanged = headConfigBlobSha !== loadedConfig.blobSha;
     const changedFiles = await listChangedFiles(repoPath, baseSha, headSha);
-    const riskPatterns = await collectRiskPatterns(
+    const baseReproductionWorktree = await createWorktree(
       repoPath,
+      worktreeRoot,
+      "base-reproduce",
+      options.baseRef,
+      baseSha
+    );
+    const headReproductionWorktree = await createWorktree(
+      repoPath,
+      worktreeRoot,
+      "head-reproduce",
+      options.headRef,
+      headSha
+    );
+    const headTestWorktree = await createWorktree(
+      repoPath,
+      worktreeRoot,
+      "head-test",
+      options.headRef,
+      headSha
+    );
+    worktrees.push(baseReproductionWorktree, headReproductionWorktree, headTestWorktree);
+    const riskPatterns = await collectRiskPatterns(
+      headTestWorktree.path,
       options.adapters ?? [],
-      options.config.risk.dependency_files,
-      options.config.risk.public_api_files
+      config.risk.dependency_files,
+      config.risk.public_api_files
     );
     const dependencyChangedFiles = matchChangedFiles(changedFiles, riskPatterns.dependency);
     const publicApiChangedFiles = matchChangedFiles(changedFiles, riskPatterns.publicApi);
-    baseWorktree = await createWorktree(repoPath, worktreeRoot, "base", options.baseRef, baseSha);
-    headWorktree = await createWorktree(repoPath, worktreeRoot, "head", options.headRef, headSha);
-    const env = createCommandEnvironment(process.env, options.config.runtime.env_passthrough);
+    const redactedValues = collectRedactedValues(process.env);
     const baseReproductionResult = await runCommand({
-      command: options.config.commands.reproduce.run,
-      cwd: baseWorktree.path,
-      env,
-      outputLimitBytes: options.config.output.limit_bytes,
-      timeoutMs: options.config.commands.reproduce.timeout_ms
+      command: config.commands.reproduce.run,
+      cwd: baseReproductionWorktree.path,
+      env: await createStageEnvironment(tmpRoot, "base-reproduce"),
+      outputLimitBytes: config.output.limit_bytes,
+      timeoutMs: config.commands.reproduce.timeout_ms
     });
     const headReproductionResult = await runCommand({
-      command: options.config.commands.reproduce.run,
-      cwd: headWorktree.path,
-      env,
-      outputLimitBytes: options.config.output.limit_bytes,
-      timeoutMs: options.config.commands.reproduce.timeout_ms
+      command: config.commands.reproduce.run,
+      cwd: headReproductionWorktree.path,
+      env: await createStageEnvironment(tmpRoot, "head-reproduce"),
+      outputLimitBytes: config.output.limit_bytes,
+      timeoutMs: config.commands.reproduce.timeout_ms
     });
     const headTestResult = await runCommand({
-      command: options.config.commands.test.run,
-      cwd: headWorktree.path,
-      env,
-      outputLimitBytes: options.config.output.limit_bytes,
-      timeoutMs: options.config.commands.test.timeout_ms
+      command: config.commands.test.run,
+      cwd: headTestWorktree.path,
+      env: await createStageEnvironment(tmpRoot, "head-test"),
+      outputLimitBytes: config.output.limit_bytes,
+      timeoutMs: config.commands.test.timeout_ms
     });
     const baseReproduction = toCommandEvidence(
       "reproduce:base",
       baseReproductionResult,
       baseSha,
-      options.config.commands.reproduce.expected_exit_code.base
+      config.commands.reproduce.expected_exit_code.base,
+      { cwd: ".", redactedValues }
     );
     const headReproduction = toCommandEvidence(
       "reproduce:head",
       headReproductionResult,
       headSha,
-      options.config.commands.reproduce.expected_exit_code.head
+      config.commands.reproduce.expected_exit_code.head,
+      { cwd: ".", redactedValues }
     );
     const headTests = toCommandEvidence(
       "test:head",
       headTestResult,
       headSha,
-      options.config.commands.test.expected_exit_code
+      config.commands.test.expected_exit_code,
+      { cwd: ".", redactedValues }
     );
     const determinations = evaluateDeterminations({
       baseReproduction,
       dependencyChangedFiles,
       headReproduction,
       headTests,
+      policyChanged,
       publicApiChangedFiles
     });
     const verdict = evaluateVerdict(determinations);
@@ -13795,13 +13955,20 @@ async function verifyPatchProof(options) {
       patchproof_version: PATCHPROOF_VERSION,
       generated_at: (/* @__PURE__ */ new Date()).toISOString(),
       repository: {
-        root: repoPath,
+        root: ".",
         base_ref: options.baseRef,
         head_ref: options.headRef,
         base_sha: baseSha,
         head_sha: headSha
       },
-      config_path: (0, import_node_path5.resolve)(options.configPath),
+      config: {
+        path: loadedConfig.path,
+        source_ref: loadedConfig.sourceRef,
+        source_sha: loadedConfig.sourceSha,
+        blob_sha: loadedConfig.blobSha,
+        policy_changed: policyChanged
+      },
+      config_path: loadedConfig.path,
       environment: {
         platform: process.platform,
         node_version: process.version
@@ -13824,7 +13991,7 @@ async function verifyPatchProof(options) {
       determinations,
       verdict,
       codex: {
-        enabled: options.config.codex.enabled,
+        enabled: config.codex.enabled,
         verdict_influence: "none"
       }
     });
@@ -13837,10 +14004,8 @@ async function verifyPatchProof(options) {
   } catch (error) {
     throw new VerificationRuntimeError("PatchProof verification failed at runtime", error);
   } finally {
-    await Promise.allSettled([
-      baseWorktree ? removeWorktree(repoPath, baseWorktree.path) : Promise.resolve(),
-      headWorktree ? removeWorktree(repoPath, headWorktree.path) : Promise.resolve()
-    ]);
+    await Promise.allSettled(worktrees.map((worktree) => removeWorktree(repoPath, worktree.path)));
+    await (0, import_promises5.rm)(tmpRoot, { force: true, recursive: true });
   }
 }
 async function writeProofFiles(proof, proofDir) {
@@ -13851,6 +14016,24 @@ async function writeProofFiles(proof, proofDir) {
   await (0, import_promises5.writeFile)(proofMarkdownPath, renderMarkdownReport(proof), "utf8");
   return { proofJsonPath, proofMarkdownPath };
 }
+async function createStageEnvironment(tmpRoot, stageName) {
+  const stageTmp = (0, import_node_path5.join)(tmpRoot, `${stageName}-${(0, import_node_crypto2.randomUUID)()}`);
+  await (0, import_promises5.mkdir)(stageTmp, { recursive: true });
+  return createCommandEnvironment(process.env, {
+    overrides: {
+      HOME: stageTmp,
+      TEMP: stageTmp,
+      TMP: stageTmp,
+      TMPDIR: stageTmp
+    }
+  });
+}
+function collectRedactedValues(env) {
+  return Object.entries(env).filter((entry) => {
+    const [key, value] = entry;
+    return value !== void 0 && value.length >= 4 && (SECRET_ENV_NAME_PATTERN.test(key) || SECRET_VALUE_PATTERN.test(value));
+  }).map(([, value]) => value);
+}
 
 // src/index.ts
 async function runAction() {
@@ -13858,12 +14041,10 @@ async function runAction() {
   const baseRef = inputEnv("base-ref", "BASE_REF") ?? requiredEnv("PATCHPROOF_BASE_REF");
   const headRef = inputEnv("head-ref", "HEAD_REF") ?? requiredEnv("PATCHPROOF_HEAD_REF");
   const configPath = inputEnv("config", "CONFIG") ?? process.env.PATCHPROOF_CONFIG ?? DEFAULT_CONFIG_FILE;
-  const loaded = await loadPatchProofConfig(workspace, configPath);
   const result = await verifyPatchProof({
     adapters: [nodeAdapter, pythonAdapter],
     baseRef,
-    config: loaded.config,
-    configPath: loaded.path,
+    configPath,
     headRef,
     repoPath: workspace
   });

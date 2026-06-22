@@ -45,10 +45,19 @@ function sampleProof(): Proof {
         head: command("test:head", 0, 0)
       }
     },
-    config_path: "/repo/patchproof.yml",
+    config: {
+      blob_sha: "config-blob",
+      path: "patchproof.yml",
+      policy_changed: false,
+      source_ref: "base",
+      source_sha: "a"
+    },
+    config_path: "patchproof.yml",
     determinations: {
       dependency_files_changed: false,
       fixed_on_head: true,
+      infrastructure_error: false,
+      policy_changed: false,
       public_api_files_changed: true,
       reproduced_on_base: true,
       tests_passed: true
@@ -64,7 +73,7 @@ function sampleProof(): Proof {
       base_sha: "a",
       head_ref: "head",
       head_sha: "b",
-      root: "/repo"
+      root: "."
     },
     schema_version: 1,
     verdict: {
@@ -84,6 +93,8 @@ function command(name: string, exitCode: number, expectedExitCode: number) {
     exit_code: exitCode,
     expected_exit_code: expectedExitCode,
     name,
+    infrastructure_error: false,
+    infrastructure_error_reason: null,
     passed: exitCode === expectedExitCode,
     signal: null,
     stderr: "",

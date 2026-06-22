@@ -7,6 +7,8 @@ export interface Determinations {
   tests_passed: boolean;
   dependency_files_changed: boolean;
   public_api_files_changed: boolean;
+  policy_changed: boolean;
+  infrastructure_error: boolean;
 }
 
 export interface Verdict {
@@ -19,24 +21,29 @@ export function toCommandEvidence(
   name: string,
   result: CommandResult,
   commitSha: string,
-  expectedExitCode: number
+  expectedExitCode: number,
+  options: { cwd?: string; redactedValues?: readonly string[] } = {}
 ): CommandEvidence {
-  const passed = !result.timedOut && result.exitCode === expectedExitCode;
+  const infrastructureErrorReason = classifyInfrastructureError(result);
+  const passed =
+    infrastructureErrorReason === null && !result.timedOut && result.exitCode === expectedExitCode;
 
   return {
     name,
     command: result.command,
-    cwd: result.cwd,
+    cwd: options.cwd ?? result.cwd,
     commit_sha: commitSha,
     expected_exit_code: expectedExitCode,
     exit_code: result.exitCode,
     signal: result.signal,
     duration_ms: result.durationMs,
-    stdout: result.stdout,
-    stderr: result.stderr,
+    stdout: redactText(result.stdout, [...(options.redactedValues ?? []), result.cwd]),
+    stderr: redactText(result.stderr, [...(options.redactedValues ?? []), result.cwd]),
     stdout_truncated: result.stdoutTruncated,
     stderr_truncated: result.stderrTruncated,
     timed_out: result.timedOut,
+    infrastructure_error: infrastructureErrorReason !== null,
+    infrastructure_error_reason: infrastructureErrorReason,
     passed
   };
 }
@@ -47,13 +54,21 @@ export function evaluateDeterminations(input: {
   headTests: CommandEvidence;
   dependencyChangedFiles: readonly string[];
   publicApiChangedFiles: readonly string[];
+  policyChanged: boolean;
 }): Determinations {
+  const infrastructure_error =
+    input.baseReproduction.infrastructure_error ||
+    input.headReproduction.infrastructure_error ||
+    input.headTests.infrastructure_error;
+
   return {
     reproduced_on_base: input.baseReproduction.passed,
     fixed_on_head: input.headReproduction.passed,
     tests_passed: input.headTests.passed,
     dependency_files_changed: input.dependencyChangedFiles.length > 0,
-    public_api_files_changed: input.publicApiChangedFiles.length > 0
+    public_api_files_changed: input.publicApiChangedFiles.length > 0,
+    policy_changed: input.policyChanged,
+    infrastructure_error
   };
 }
 
@@ -61,7 +76,8 @@ export function evaluateVerdict(determinations: Determinations): Verdict {
   if (
     determinations.reproduced_on_base &&
     determinations.fixed_on_head &&
-    determinations.tests_passed
+    determinations.tests_passed &&
+    !determinations.infrastructure_error
   ) {
     return {
       status: "verified",
@@ -71,6 +87,9 @@ export function evaluateVerdict(determinations: Determinations): Verdict {
   }
 
   const failed: string[] = [];
+  if (determinations.infrastructure_error) {
+    failed.push("one or more commands ended with an infrastructure error");
+  }
   if (!determinations.reproduced_on_base) {
     failed.push("base reproduction did not match the expected exit code");
   }
@@ -90,4 +109,44 @@ export function evaluateVerdict(determinations: Determinations): Verdict {
 
 export function proofExitCode(proof: Proof): 0 | 1 {
   return proof.verdict.exit_code;
+}
+
+function classifyInfrastructureError(result: CommandResult): string | null {
+  const combined = `${result.stderr}\n${result.stdout}`;
+
+  if (result.timedOut) {
+    return "timeout";
+  }
+  if (result.signal !== null) {
+    return `signal:${result.signal}`;
+  }
+  if (result.exitCode === 126 || result.exitCode === 127) {
+    return `command_exit_${result.exitCode}`;
+  }
+  if (/MODULE_NOT_FOUND|ERR_MODULE_NOT_FOUND|Cannot find module/.test(combined)) {
+    return "missing_module_or_script";
+  }
+  if (/ModuleNotFoundError|ImportError:|No module named/.test(combined)) {
+    return "missing_python_module";
+  }
+  if (/command not found|No such file or directory|ENOENT/i.test(combined)) {
+    return "missing_command_or_file";
+  }
+
+  return null;
+}
+
+function redactText(text: string, redactedValues: readonly string[]): string {
+  let redacted = text.replace(
+    /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9_-]{20,}|[A-Za-z0-9+/]{32,}={0,2})\b/g,
+    "[REDACTED]"
+  );
+
+  for (const value of redactedValues) {
+    if (value.length >= 4) {
+      redacted = redacted.split(value).join("[REDACTED]");
+    }
+  }
+
+  return redacted;
 }

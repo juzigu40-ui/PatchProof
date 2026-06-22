@@ -28,6 +28,8 @@ function sampleProof(): Proof {
     duration_ms: 1,
     exit_code: 1,
     expected_exit_code: 0,
+    infrastructure_error: false,
+    infrastructure_error_reason: null,
     name: "test",
     passed: false,
     signal: null,
@@ -58,10 +60,19 @@ function sampleProof(): Proof {
         head: command
       }
     },
-    config_path: "/repo/patchproof.yml",
+    config: {
+      blob_sha: "config-blob",
+      path: "patchproof.yml",
+      policy_changed: false,
+      source_ref: "base",
+      source_sha: "a"
+    },
+    config_path: "patchproof.yml",
     determinations: {
       dependency_files_changed: false,
       fixed_on_head: false,
+      infrastructure_error: false,
+      policy_changed: false,
       public_api_files_changed: false,
       reproduced_on_base: false,
       tests_passed: false
@@ -77,7 +88,7 @@ function sampleProof(): Proof {
       base_sha: "a",
       head_ref: "head",
       head_sha: "b",
-      root: "/repo"
+      root: "."
     },
     schema_version: 1,
     verdict: {

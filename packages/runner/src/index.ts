@@ -27,12 +27,16 @@ export interface RunCommandOptions {
   env?: NodeJS.ProcessEnv;
 }
 
+export interface CreateCommandEnvironmentOptions {
+  passthrough?: readonly string[];
+  overrides?: NodeJS.ProcessEnv;
+}
+
 export const SAFE_ENV_KEYS = new Set([
   "CI",
   "FORCE_COLOR",
   "GITHUB_ACTIONS",
   "GITHUB_WORKSPACE",
-  "HOME",
   "LANG",
   "LC_ALL",
   "LOGNAME",
@@ -49,8 +53,10 @@ export const SAFE_ENV_KEYS = new Set([
 
 export function createCommandEnvironment(
   source: NodeJS.ProcessEnv = process.env,
-  passthrough: readonly string[] = []
+  options: readonly string[] | CreateCommandEnvironmentOptions = []
 ): NodeJS.ProcessEnv {
+  const passthrough = isStringArray(options) ? options : (options.passthrough ?? []);
+  const overrides = isStringArray(options) ? {} : (options.overrides ?? {});
   const keys = new Set([...SAFE_ENV_KEYS, ...passthrough]);
   const env: NodeJS.ProcessEnv = {};
 
@@ -61,7 +67,16 @@ export function createCommandEnvironment(
     }
   }
 
-  return env;
+  return {
+    ...env,
+    ...overrides
+  };
+}
+
+function isStringArray(
+  value: readonly string[] | CreateCommandEnvironmentOptions
+): value is readonly string[] {
+  return Array.isArray(value);
 }
 
 export async function runCommand(options: RunCommandOptions): Promise<CommandResult> {
@@ -73,6 +88,7 @@ export async function runCommand(options: RunCommandOptions): Promise<CommandRes
     const child = spawn(options.command, {
       cwd: options.cwd,
       env: options.env ?? createCommandEnvironment(),
+      detached: process.platform !== "win32",
       shell: true,
       windowsHide: true
     });
@@ -80,11 +96,9 @@ export async function runCommand(options: RunCommandOptions): Promise<CommandRes
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
+      killProcessTree(child.pid, "SIGTERM");
       setTimeout(() => {
-        if (!child.killed) {
-          child.kill("SIGKILL");
-        }
+        killProcessTree(child.pid, "SIGKILL");
       }, 500).unref();
     }, options.timeoutMs);
     timeout.unref();
@@ -113,6 +127,22 @@ export async function runCommand(options: RunCommandOptions): Promise<CommandRes
       });
     });
   });
+}
+
+function killProcessTree(pid: number | undefined, signal: NodeJS.Signals): void {
+  if (pid === undefined) {
+    return;
+  }
+
+  try {
+    if (process.platform === "win32") {
+      process.kill(pid, signal);
+      return;
+    }
+    process.kill(-pid, signal);
+  } catch {
+    // The process may have exited naturally between timeout handling steps.
+  }
 }
 
 function createLimitedCapture(limitBytes: number): {

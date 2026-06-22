@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs";
 import { nodeAdapter } from "@patchproof/adapters-node";
 import { pythonAdapter } from "@patchproof/adapters-python";
-import { DEFAULT_CONFIG_FILE, loadPatchProofConfig } from "@patchproof/config";
+import { DEFAULT_CONFIG_FILE } from "@patchproof/config";
 import { verifyPatchProof } from "@patchproof/core";
 
 export async function runAction(): Promise<number> {
@@ -11,12 +11,10 @@ export async function runAction(): Promise<number> {
   const configPath =
     inputEnv("config", "CONFIG") ?? process.env.PATCHPROOF_CONFIG ?? DEFAULT_CONFIG_FILE;
 
-  const loaded = await loadPatchProofConfig(workspace, configPath);
   const result = await verifyPatchProof({
     adapters: [nodeAdapter, pythonAdapter],
     baseRef,
-    config: loaded.config,
-    configPath: loaded.path,
+    configPath,
     headRef,
     repoPath: workspace
   });

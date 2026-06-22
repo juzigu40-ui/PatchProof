@@ -1,8 +1,11 @@
+import { execFile } from "node:child_process";
 import { access, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, normalize, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 import { parse, stringify } from "yaml";
 import { z } from "zod";
 
+const execFileAsync = promisify(execFile);
 const exitCodeSchema = z.number().int().min(0).max(255);
 
 export const PatchProofConfigSchema = z
@@ -39,7 +42,10 @@ export const PatchProofConfigSchema = z
       .default({}),
     runtime: z
       .object({
-        env_passthrough: z.array(z.string().regex(/^[A-Z_][A-Z0-9_]*$/)).default([])
+        env_passthrough: z
+          .array(z.string().regex(/^[A-Z_][A-Z0-9_]*$/))
+          .max(0, "env_passthrough is disabled for untrusted verification")
+          .default([])
       })
       .strict()
       .default({}),
@@ -65,6 +71,12 @@ export type PatchProofConfig = z.infer<typeof PatchProofConfigSchema>;
 export interface LoadedPatchProofConfig {
   config: PatchProofConfig;
   path: string;
+}
+
+export interface LoadedGitPatchProofConfig extends LoadedPatchProofConfig {
+  blobSha: string;
+  sourceRef: string;
+  sourceSha: string;
 }
 
 export class ConfigError extends Error {
@@ -108,6 +120,25 @@ export function formatDefaultConfig(config: PatchProofConfig = createDefaultConf
   });
 }
 
+export function parsePatchProofConfig(
+  raw: string,
+  configPath = DEFAULT_CONFIG_FILE
+): PatchProofConfig {
+  let parsed: unknown;
+  try {
+    parsed = parse(raw);
+  } catch (error) {
+    throw new ConfigError(`Could not parse ${configPath} as YAML`, error);
+  }
+
+  const result = PatchProofConfigSchema.safeParse(parsed);
+  if (!result.success) {
+    throw new ConfigError(`Invalid ${configPath}: ${result.error.message}`, result.error);
+  }
+
+  return result.data;
+}
+
 export async function loadPatchProofConfig(
   cwd: string,
   configPath = DEFAULT_CONFIG_FILE
@@ -121,22 +152,72 @@ export async function loadPatchProofConfig(
     throw new ConfigError(`Could not read ${configPath}`, error);
   }
 
-  let parsed: unknown;
-  try {
-    parsed = parse(raw);
-  } catch (error) {
-    throw new ConfigError(`Could not parse ${configPath} as YAML`, error);
-  }
-
-  const result = PatchProofConfigSchema.safeParse(parsed);
-  if (!result.success) {
-    throw new ConfigError(`Invalid ${configPath}: ${result.error.message}`, result.error);
-  }
-
   return {
-    config: result.data,
+    config: parsePatchProofConfig(raw, configPath),
     path: absolutePath
   };
+}
+
+export async function loadPatchProofConfigFromGit(
+  repoPath: string,
+  ref: string,
+  configPath = DEFAULT_CONFIG_FILE
+): Promise<LoadedGitPatchProofConfig> {
+  const safePath = normalizeRelativeConfigPath(configPath);
+
+  try {
+    const sourceSha = (
+      await execFileAsync("git", ["rev-parse", "--verify", `${ref}^{commit}`], {
+        cwd: repoPath
+      })
+    ).stdout
+      .toString()
+      .trim();
+    const raw = (
+      await execFileAsync("git", ["show", `${sourceSha}:${safePath}`], {
+        cwd: repoPath,
+        maxBuffer: 10 * 1024 * 1024
+      })
+    ).stdout.toString();
+    const blobSha = await getGitBlobSha(repoPath, sourceSha, safePath);
+
+    return {
+      blobSha,
+      config: parsePatchProofConfig(raw, safePath),
+      path: safePath,
+      sourceRef: ref,
+      sourceSha
+    };
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      throw error;
+    }
+    throw new ConfigError(`Could not read trusted ${safePath} from ${ref}`, error);
+  }
+}
+
+export async function getGitBlobSha(
+  repoPath: string,
+  ref: string,
+  configPath = DEFAULT_CONFIG_FILE
+): Promise<string> {
+  const safePath = normalizeRelativeConfigPath(configPath);
+  const { stdout } = await execFileAsync("git", ["rev-parse", `${ref}:${safePath}`], {
+    cwd: repoPath
+  });
+  return stdout.toString().trim();
+}
+
+export async function tryGetGitBlobSha(
+  repoPath: string,
+  ref: string,
+  configPath = DEFAULT_CONFIG_FILE
+): Promise<string | null> {
+  try {
+    return await getGitBlobSha(repoPath, ref, configPath);
+  } catch {
+    return null;
+  }
 }
 
 export async function writeInitialConfig(
@@ -160,4 +241,17 @@ export async function writeInitialConfig(
 
 export function resolveConfigPath(cwd: string, configPath = DEFAULT_CONFIG_FILE): string {
   return join(cwd, configPath);
+}
+
+function normalizeRelativeConfigPath(configPath: string): string {
+  if (isAbsolute(configPath)) {
+    throw new ConfigError("Config path must be relative");
+  }
+
+  const normalized = normalize(configPath);
+  if (normalized === ".." || normalized.startsWith(`..${sep}`)) {
+    throw new ConfigError("Config path must stay inside the repository");
+  }
+
+  return normalized.replaceAll("\\", "/");
 }

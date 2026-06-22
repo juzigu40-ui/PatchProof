@@ -13,14 +13,17 @@ describe("verdict", () => {
       headReproduction: evidence(true),
       headTests: evidence(true),
       dependencyChangedFiles: [],
+      policyChanged: false,
       publicApiChangedFiles: ["index.ts"]
     });
 
     expect(determinations).toEqual({
       reproduced_on_base: true,
       fixed_on_head: true,
+      infrastructure_error: false,
       tests_passed: true,
       dependency_files_changed: false,
+      policy_changed: false,
       public_api_files_changed: true
     });
     expect(evaluateVerdict(determinations)).toMatchObject({
@@ -35,6 +38,8 @@ describe("verdict", () => {
       fixed_on_head: true,
       tests_passed: true,
       dependency_files_changed: false,
+      infrastructure_error: false,
+      policy_changed: false,
       public_api_files_changed: false
     });
 
@@ -49,12 +54,29 @@ describe("verdict", () => {
       fixed_on_head: false,
       tests_passed: false,
       dependency_files_changed: false,
+      infrastructure_error: false,
+      policy_changed: false,
       public_api_files_changed: false
     });
 
     expect(verdict.reason).toContain("base reproduction");
     expect(verdict.reason).toContain("head reproduction");
     expect(verdict.reason).toContain("head tests");
+  });
+
+  it("fails when an infrastructure error is present", () => {
+    const verdict = evaluateVerdict({
+      reproduced_on_base: true,
+      fixed_on_head: true,
+      tests_passed: true,
+      dependency_files_changed: false,
+      infrastructure_error: true,
+      policy_changed: false,
+      public_api_files_changed: false
+    });
+
+    expect(verdict.status).toBe("failed");
+    expect(verdict.reason).toContain("infrastructure error");
   });
 
   it("converts command result to evidence", () => {
@@ -73,9 +95,79 @@ describe("verdict", () => {
 
     expect(toCommandEvidence("test:head", commandResult, "abc", 0)).toMatchObject({
       commit_sha: "abc",
+      infrastructure_error: false,
       passed: true
     });
     expect(toCommandEvidence("test:head", commandResult, "abc", 1).passed).toBe(false);
+  });
+
+  it("classifies missing harness files as infrastructure errors", () => {
+    const commandResult: CommandResult = {
+      command: "node reproduce.js",
+      cwd: "/repo",
+      durationMs: 12,
+      exitCode: 1,
+      signal: null,
+      stderr: "Error: Cannot find module '/repo/reproduce.js'",
+      stderrTruncated: false,
+      stdout: "",
+      stdoutTruncated: false,
+      timedOut: false
+    };
+
+    expect(toCommandEvidence("reproduce:base", commandResult, "abc", 1)).toMatchObject({
+      infrastructure_error: true,
+      infrastructure_error_reason: "missing_module_or_script",
+      passed: false,
+      stderr: "Error: Cannot find module '[REDACTED]/reproduce.js'"
+    });
+  });
+
+  it("classifies infrastructure failures deterministically", () => {
+    expect(
+      toCommandEvidence("test:head", commandResult({ timedOut: true, exitCode: null }), "abc", 0)
+        .infrastructure_error_reason
+    ).toBe("timeout");
+    expect(
+      toCommandEvidence("test:head", commandResult({ signal: "SIGTERM", exitCode: null }), "abc", 0)
+        .infrastructure_error_reason
+    ).toBe("signal:SIGTERM");
+    expect(
+      toCommandEvidence("test:head", commandResult({ exitCode: 127 }), "abc", 0)
+    ).toMatchObject({
+      infrastructure_error_reason: "command_exit_127",
+      passed: false
+    });
+    expect(
+      toCommandEvidence(
+        "test:head",
+        commandResult({ stderr: "ModuleNotFoundError: No module named 'demo'" }),
+        "abc",
+        1
+      ).infrastructure_error_reason
+    ).toBe("missing_python_module");
+    expect(
+      toCommandEvidence(
+        "test:head",
+        commandResult({ stderr: "sh: missing-tool: command not found" }),
+        "abc",
+        1
+      ).infrastructure_error_reason
+    ).toBe("missing_command_or_file");
+  });
+
+  it("redacts token-like values and ignores short redaction values", () => {
+    const evidence = toCommandEvidence(
+      "test:head",
+      commandResult({
+        stdout: "abc ghp_abcdefghijklmnopqrstuvwxyz123456"
+      }),
+      "abc",
+      0,
+      { redactedValues: ["abc"] }
+    );
+
+    expect(evidence.stdout).toBe("abc [REDACTED]");
   });
 
   it("reads proof exit codes", () => {
@@ -91,6 +183,8 @@ function evidence(passed: boolean) {
     duration_ms: 1,
     exit_code: passed ? 0 : 1,
     expected_exit_code: 0,
+    infrastructure_error: false,
+    infrastructure_error_reason: null,
     name: "test",
     passed,
     signal: null,
@@ -99,5 +193,21 @@ function evidence(passed: boolean) {
     stdout: "",
     stdout_truncated: false,
     timed_out: false
+  };
+}
+
+function commandResult(overrides: Partial<CommandResult> = {}): CommandResult {
+  return {
+    command: "node test.js",
+    cwd: "/repo",
+    durationMs: 12,
+    exitCode: 0,
+    signal: null,
+    stderr: "",
+    stderrTruncated: false,
+    stdout: "ok",
+    stdoutTruncated: false,
+    timedOut: false,
+    ...overrides
   };
 }

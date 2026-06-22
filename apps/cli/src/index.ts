@@ -2,12 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { nodeAdapter } from "@patchproof/adapters-node";
 import { pythonAdapter } from "@patchproof/adapters-python";
-import {
-  ConfigError,
-  DEFAULT_CONFIG_FILE,
-  loadPatchProofConfig,
-  writeInitialConfig
-} from "@patchproof/config";
+import { ConfigError, DEFAULT_CONFIG_FILE, writeInitialConfig } from "@patchproof/config";
 import {
   loadProof,
   renderJsonReport,
@@ -72,15 +67,10 @@ async function verifyCommand(args: readonly string[], io: CliIO): Promise<number
 
   const base = requiredValue(parsed.values.base, "--base");
   const head = requiredValue(parsed.values.head, "--head");
-  const loaded = await loadPatchProofConfig(
-    process.cwd(),
-    parsed.values.config ?? DEFAULT_CONFIG_FILE
-  );
   const result = await verifyPatchProof({
     adapters: [nodeAdapter, pythonAdapter],
     baseRef: base,
-    config: loaded.config,
-    configPath: loaded.path,
+    configPath: parsed.values.config ?? DEFAULT_CONFIG_FILE,
     headRef: head,
     repoPath: process.cwd()
   });

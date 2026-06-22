@@ -1,6 +1,7 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { createCommandEnvironment, runCommand } from "./index.js";
 
 describe("runner", () => {
@@ -29,6 +30,33 @@ describe("runner", () => {
     });
 
     expect(result.timedOut).toBe(true);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("kills child processes when a command times out", async () => {
+    const dir = await temporaryDirectory();
+    const marker = join(dir, "orphan-evidence");
+    const childScript = [
+      "const fs = require('node:fs');",
+      `setTimeout(() => fs.writeFileSync(${JSON.stringify(marker)}, 'survived'), 700);`,
+      "setTimeout(() => {}, 5000);"
+    ].join("\n");
+    const parentScript = [
+      "const { spawn } = require('node:child_process');",
+      `spawn(process.execPath, ['-e', ${JSON.stringify(childScript)}], { stdio: 'ignore' });`,
+      "setTimeout(() => {}, 5000);"
+    ].join("\n");
+
+    const result = await runCommand({
+      command: `node -e ${JSON.stringify(parentScript)}`,
+      cwd: dir,
+      outputLimitBytes: 1024,
+      timeoutMs: 50
+    });
+    await delay(1000);
+
+    expect(result.timedOut).toBe(true);
+    await expect(access(marker)).rejects.toThrow();
     await rm(dir, { recursive: true, force: true });
   });
 

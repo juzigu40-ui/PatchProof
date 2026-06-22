@@ -28,4 +28,23 @@ describe("risk", () => {
       publicApi: ["api.ts"]
     });
   });
+
+  it("does not add patterns from undetected adapters", async () => {
+    const adapter: RepositoryAdapter = {
+      name: "demo",
+      dependencyFilePatterns: ["lock.file"],
+      publicApiFilePatterns: ["api.ts"],
+      async detect() {
+        return false;
+      }
+    };
+
+    await expect(
+      collectRiskPatterns("/repo", [adapter], ["custom.lock"], ["src/**/*.ts"])
+    ).resolves.toEqual({
+      adapters: [],
+      dependency: ["custom.lock"],
+      publicApi: ["src/**/*.ts"]
+    });
+  });
 });

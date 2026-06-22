@@ -9,6 +9,7 @@
     "patchproof_version",
     "generated_at",
     "repository",
+    "config",
     "config_path",
     "environment",
     "adapters",
@@ -32,6 +33,18 @@
         "head_ref": { "type": "string" },
         "base_sha": { "type": "string" },
         "head_sha": { "type": "string" }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "source_ref", "source_sha", "blob_sha", "policy_changed"],
+      "properties": {
+        "path": { "type": "string" },
+        "source_ref": { "type": "string" },
+        "source_sha": { "type": "string" },
+        "blob_sha": { "type": "string" },
+        "policy_changed": { "type": "boolean" }
       }
     },
     "config_path": { "type": "string" },
@@ -90,14 +103,18 @@
         "fixed_on_head",
         "tests_passed",
         "dependency_files_changed",
-        "public_api_files_changed"
+        "public_api_files_changed",
+        "policy_changed",
+        "infrastructure_error"
       ],
       "properties": {
         "reproduced_on_base": { "type": "boolean" },
         "fixed_on_head": { "type": "boolean" },
         "tests_passed": { "type": "boolean" },
         "dependency_files_changed": { "type": "boolean" },
-        "public_api_files_changed": { "type": "boolean" }
+        "public_api_files_changed": { "type": "boolean" },
+        "policy_changed": { "type": "boolean" },
+        "infrastructure_error": { "type": "boolean" }
       }
     },
     "verdict": {
@@ -138,6 +155,8 @@
         "stdout_truncated",
         "stderr_truncated",
         "timed_out",
+        "infrastructure_error",
+        "infrastructure_error_reason",
         "passed"
       ],
       "properties": {
@@ -158,6 +177,10 @@
         "stdout_truncated": { "type": "boolean" },
         "stderr_truncated": { "type": "boolean" },
         "timed_out": { "type": "boolean" },
+        "infrastructure_error": { "type": "boolean" },
+        "infrastructure_error_reason": {
+          "anyOf": [{ "type": "string" }, { "type": "null" }]
+        },
         "passed": { "type": "boolean" }
       }
     }
