@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://patchproof.dev/schemas/proof.schema.json",
+  "title": "PatchProof proof",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "patchproof_version",
+    "generated_at",
+    "repository",
+    "config_path",
+    "environment",
+    "adapters",
+    "commands",
+    "changed_files",
+    "determinations",
+    "verdict",
+    "codex"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "patchproof_version": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "base_ref", "head_ref", "base_sha", "head_sha"],
+      "properties": {
+        "root": { "type": "string" },
+        "base_ref": { "type": "string" },
+        "head_ref": { "type": "string" },
+        "base_sha": { "type": "string" },
+        "head_sha": { "type": "string" }
+      }
+    },
+    "config_path": { "type": "string" },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "node_version"],
+      "properties": {
+        "platform": { "type": "string" },
+        "node_version": { "type": "string" }
+      }
+    },
+    "adapters": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reproduction", "tests"],
+      "properties": {
+        "reproduction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["base", "head"],
+          "properties": {
+            "base": { "$ref": "#/$defs/commandEvidence" },
+            "head": { "$ref": "#/$defs/commandEvidence" }
+          }
+        },
+        "tests": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["head"],
+          "properties": {
+            "head": { "$ref": "#/$defs/commandEvidence" }
+          }
+        }
+      }
+    },
+    "changed_files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["all", "dependency", "public_api"],
+      "properties": {
+        "all": { "type": "array", "items": { "type": "string" } },
+        "dependency": { "type": "array", "items": { "type": "string" } },
+        "public_api": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "determinations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reproduced_on_base",
+        "fixed_on_head",
+        "tests_passed",
+        "dependency_files_changed",
+        "public_api_files_changed"
+      ],
+      "properties": {
+        "reproduced_on_base": { "type": "boolean" },
+        "fixed_on_head": { "type": "boolean" },
+        "tests_passed": { "type": "boolean" },
+        "dependency_files_changed": { "type": "boolean" },
+        "public_api_files_changed": { "type": "boolean" }
+      }
+    },
+    "verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "reason", "exit_code"],
+      "properties": {
+        "status": { "enum": ["verified", "failed"] },
+        "reason": { "type": "string" },
+        "exit_code": { "enum": [0, 1] }
+      }
+    },
+    "codex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "verdict_influence"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "verdict_influence": { "const": "none" }
+      }
+    }
+  },
+  "$defs": {
+    "commandEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "command",
+        "cwd",
+        "commit_sha",
+        "expected_exit_code",
+        "exit_code",
+        "signal",
+        "duration_ms",
+        "stdout",
+        "stderr",
+        "stdout_truncated",
+        "stderr_truncated",
+        "timed_out",
+        "passed"
+      ],
+      "properties": {
+        "name": { "type": "string" },
+        "command": { "type": "string" },
+        "cwd": { "type": "string" },
+        "commit_sha": { "type": "string" },
+        "expected_exit_code": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "exit_code": {
+          "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 255 }, { "type": "null" }]
+        },
+        "signal": {
+          "anyOf": [{ "type": "string" }, { "type": "null" }]
+        },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" },
+        "stdout_truncated": { "type": "boolean" },
+        "stderr_truncated": { "type": "boolean" },
+        "timed_out": { "type": "boolean" },
+        "passed": { "type": "boolean" }
+      }
+    }
+  }
+}
