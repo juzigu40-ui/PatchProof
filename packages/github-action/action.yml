@@ -1,0 +1,16 @@
+name: "PatchProof"
+description: "Verify deterministic proof that a pull request fixes its claimed issue."
+inputs:
+  base-ref:
+    description: "Base git ref or SHA to verify against."
+    required: true
+  head-ref:
+    description: "Head git ref or SHA to verify."
+    required: true
+  config:
+    description: "Path to patchproof.yml."
+    required: false
+    default: "patchproof.yml"
+runs:
+  using: "node22"
+  main: "dist/index.js"
