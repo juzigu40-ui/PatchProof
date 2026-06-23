@@ -6,6 +6,8 @@ import { verifyPatchProof } from "@patchproof/core";
 
 export async function runAction(): Promise<number> {
   const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
+  const repoPath =
+    inputEnv("repo-path", "REPO_PATH") ?? process.env.PATCHPROOF_REPO_PATH ?? workspace;
   const baseRef = inputEnv("base-ref", "BASE_REF") ?? requiredEnv("PATCHPROOF_BASE_REF");
   const headRef = inputEnv("head-ref", "HEAD_REF") ?? requiredEnv("PATCHPROOF_HEAD_REF");
   const configPath =
@@ -16,7 +18,7 @@ export async function runAction(): Promise<number> {
     baseRef,
     configPath,
     headRef,
-    repoPath: workspace
+    repoPath
   });
 
   const summaryPath = process.env.GITHUB_STEP_SUMMARY;

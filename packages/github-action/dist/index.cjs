@@ -11484,11 +11484,23 @@ var NEVER = INVALID;
 // ../config/src/index.ts
 var execFileAsync = (0, import_node_util.promisify)(import_node_child_process.execFile);
 var exitCodeSchema = external_exports.number().int().min(0).max(255);
+var relativePathSchema = external_exports.string().trim().min(1).transform((value, ctx) => {
+  try {
+    return normalizeRelativePath(value);
+  } catch (error) {
+    ctx.addIssue({
+      code: external_exports.ZodIssueCode.custom,
+      message: error instanceof Error ? error.message : "Path must be repository-relative"
+    });
+    return external_exports.NEVER;
+  }
+});
 var PatchProofConfigSchema = external_exports.object({
   version: external_exports.literal(1),
   commands: external_exports.object({
     reproduce: external_exports.object({
       run: external_exports.string().trim().min(1),
+      harness_files: external_exports.array(relativePathSchema).min(1, "commands.reproduce.harness_files must list trusted harness files"),
       timeout_ms: external_exports.number().int().positive().max(36e5).default(3e4),
       expected_exit_code: external_exports.object({
         base: exitCodeSchema.default(1),
@@ -11570,6 +11582,15 @@ async function getGitBlobSha(repoPath, ref, configPath = DEFAULT_CONFIG_FILE) {
   });
   return stdout.toString().trim();
 }
+async function readGitFile(repoPath, ref, filePath) {
+  const safePath = normalizeRelativePath(filePath);
+  const { stdout } = await execFileAsync("git", ["show", `${ref}:${safePath}`], {
+    cwd: repoPath,
+    encoding: "buffer",
+    maxBuffer: 10 * 1024 * 1024
+  });
+  return Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
+}
 async function tryGetGitBlobSha(repoPath, ref, configPath = DEFAULT_CONFIG_FILE) {
   try {
     return await getGitBlobSha(repoPath, ref, configPath);
@@ -11578,17 +11599,38 @@ async function tryGetGitBlobSha(repoPath, ref, configPath = DEFAULT_CONFIG_FILE)
   }
 }
 function normalizeRelativeConfigPath(configPath) {
-  if ((0, import_node_path3.isAbsolute)(configPath)) {
-    throw new ConfigError("Config path must be relative");
+  return normalizeRelativePath(configPath);
+}
+function normalizeRelativePath(path2) {
+  if ((0, import_node_path3.isAbsolute)(path2)) {
+    throw new ConfigError("Path must be relative");
   }
-  const normalized = (0, import_node_path3.normalize)(configPath);
+  const normalized = (0, import_node_path3.normalize)(path2);
+  if (normalized === ".") {
+    throw new ConfigError("Path must name a file");
+  }
   if (normalized === ".." || normalized.startsWith(`..${import_node_path3.sep}`)) {
-    throw new ConfigError("Config path must stay inside the repository");
+    throw new ConfigError("Path must stay inside the repository");
   }
   return normalized.replaceAll("\\", "/");
 }
 
 // ../core/src/schema.ts
+var ReproductionStatusSchema = external_exports.enum([
+  "assertion_failed",
+  "assertion_passed",
+  "setup_error"
+]);
+var StructuredResultSchema = external_exports.object({
+  nonce: external_exports.string(),
+  status: ReproductionStatusSchema
+}).strict();
+var HarnessFileSchema = external_exports.object({
+  path: external_exports.string(),
+  base_blob_sha: external_exports.string(),
+  head_blob_sha: external_exports.string().nullable(),
+  changed: external_exports.boolean()
+}).strict();
 var CommandEvidenceSchema = external_exports.object({
   name: external_exports.string(),
   command: external_exports.string(),
@@ -11603,6 +11645,7 @@ var CommandEvidenceSchema = external_exports.object({
   stdout_truncated: external_exports.boolean(),
   stderr_truncated: external_exports.boolean(),
   timed_out: external_exports.boolean(),
+  structured_result: StructuredResultSchema.nullable(),
   infrastructure_error: external_exports.boolean(),
   infrastructure_error_reason: external_exports.string().nullable(),
   passed: external_exports.boolean()
@@ -11626,6 +11669,10 @@ var ProofSchema = external_exports.object({
     policy_changed: external_exports.boolean()
   }).strict(),
   config_path: external_exports.string(),
+  harness: external_exports.object({
+    files: external_exports.array(HarnessFileSchema),
+    changed: external_exports.boolean()
+  }).strict(),
   environment: external_exports.object({
     platform: external_exports.string(),
     node_version: external_exports.string()
@@ -11652,6 +11699,7 @@ var ProofSchema = external_exports.object({
     dependency_files_changed: external_exports.boolean(),
     public_api_files_changed: external_exports.boolean(),
     policy_changed: external_exports.boolean(),
+    harness_changed: external_exports.boolean(),
     infrastructure_error: external_exports.boolean()
   }).strict(),
   verdict: external_exports.object({
@@ -11690,6 +11738,7 @@ function renderMarkdownReport(proof) {
     `- dependency_files_changed: ${validProof.determinations.dependency_files_changed}`,
     `- public_api_files_changed: ${validProof.determinations.public_api_files_changed}`,
     `- policy_changed: ${validProof.determinations.policy_changed}`,
+    `- harness_changed: ${validProof.determinations.harness_changed}`,
     `- infrastructure_error: ${validProof.determinations.infrastructure_error}`,
     "",
     "## Repository",
@@ -11706,6 +11755,13 @@ function renderMarkdownReport(proof) {
     `- source_sha: ${validProof.config.source_sha}`,
     `- blob_sha: ${validProof.config.blob_sha}`,
     `- policy_changed: ${validProof.config.policy_changed}`,
+    "",
+    "## Harness",
+    "",
+    `- changed: ${validProof.harness.changed}`,
+    ...validProof.harness.files.map(
+      (file) => `- ${file.path}: base=${file.base_blob_sha}, head=${file.head_blob_sha ?? "null"}, changed=${file.changed}`
+    ),
     "",
     "## Commands",
     "",
@@ -11733,6 +11789,7 @@ function commandSummary(label, command) {
     `- exit_code: ${command.exit_code ?? "null"}`,
     `- duration_ms: ${command.duration_ms}`,
     `- timed_out: ${command.timed_out}`,
+    `- structured_result: ${command.structured_result ? JSON.stringify(command.structured_result) : "null"}`,
     `- infrastructure_error: ${command.infrastructure_error}`,
     `- infrastructure_error_reason: ${command.infrastructure_error_reason ?? "null"}`,
     `- passed: ${command.passed}`,
@@ -13573,8 +13630,8 @@ function matchChangedFiles(files, patterns) {
 
 // ../core/src/verdict.ts
 function toCommandEvidence(name, result, commitSha, expectedExitCode, options = {}) {
-  const infrastructureErrorReason = classifyInfrastructureError(result);
-  const passed = infrastructureErrorReason === null && !result.timedOut && result.exitCode === expectedExitCode;
+  const infrastructureErrorReason = classifyInfrastructureError(result) ?? options.infrastructureErrorReason ?? null;
+  const passed = infrastructureErrorReason === null && !result.timedOut && (options.passOverride ?? result.exitCode === expectedExitCode);
   return {
     name,
     command: result.command,
@@ -13589,6 +13646,7 @@ function toCommandEvidence(name, result, commitSha, expectedExitCode, options = 
     stdout_truncated: result.stdoutTruncated,
     stderr_truncated: result.stderrTruncated,
     timed_out: result.timedOut,
+    structured_result: options.structuredResult ?? null,
     infrastructure_error: infrastructureErrorReason !== null,
     infrastructure_error_reason: infrastructureErrorReason,
     passed
@@ -13603,11 +13661,12 @@ function evaluateDeterminations(input) {
     dependency_files_changed: input.dependencyChangedFiles.length > 0,
     public_api_files_changed: input.publicApiChangedFiles.length > 0,
     policy_changed: input.policyChanged,
+    harness_changed: input.harnessChanged,
     infrastructure_error
   };
 }
 function evaluateVerdict(determinations) {
-  if (determinations.reproduced_on_base && determinations.fixed_on_head && determinations.tests_passed && !determinations.infrastructure_error) {
+  if (determinations.reproduced_on_base && determinations.fixed_on_head && determinations.tests_passed && !determinations.harness_changed && !determinations.infrastructure_error) {
     return {
       status: "verified",
       reason: "base reproduction matched, head reproduction matched, and head tests passed",
@@ -13617,6 +13676,9 @@ function evaluateVerdict(determinations) {
   const failed = [];
   if (determinations.infrastructure_error) {
     failed.push("one or more commands ended with an infrastructure error");
+  }
+  if (determinations.harness_changed) {
+    failed.push("trusted reproduction harness changed on head");
   }
   if (!determinations.reproduced_on_base) {
     failed.push("base reproduction did not match the expected exit code");
@@ -13636,6 +13698,48 @@ function evaluateVerdict(determinations) {
 function proofExitCode(proof) {
   return proof.verdict.exit_code;
 }
+function parseStructuredReproductionResult(result, expectedNonce) {
+  const candidates = `${result.stdout}
+${result.stderr}`.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith("{") && line.endsWith("}")).map(parseStructuredResultLine).filter((candidate) => candidate !== null);
+  if (candidates.length === 0) {
+    return {
+      infrastructureErrorReason: "structured_result_missing",
+      structuredResult: null
+    };
+  }
+  if (candidates.length > 1) {
+    return {
+      infrastructureErrorReason: "structured_result_ambiguous",
+      structuredResult: null
+    };
+  }
+  const structuredResult = candidates[0];
+  if (!structuredResult) {
+    return {
+      infrastructureErrorReason: "structured_result_missing",
+      structuredResult: null
+    };
+  }
+  if (structuredResult.nonce !== expectedNonce) {
+    return {
+      infrastructureErrorReason: "structured_result_nonce_mismatch",
+      structuredResult
+    };
+  }
+  if (structuredResult.status === "setup_error") {
+    return {
+      infrastructureErrorReason: "structured_result_setup_error",
+      structuredResult
+    };
+  }
+  return {
+    infrastructureErrorReason: null,
+    structuredResult
+  };
+}
+function expectedReproductionStatus(stage) {
+  return stage === "base" ? "assertion_failed" : "assertion_passed";
+}
 function classifyInfrastructureError(result) {
   const combined = `${result.stderr}
 ${result.stdout}`;
@@ -13654,8 +13758,22 @@ ${result.stdout}`;
   if (/ModuleNotFoundError|ImportError:|No module named/.test(combined)) {
     return "missing_python_module";
   }
-  if (/command not found|No such file or directory|ENOENT/i.test(combined)) {
+  if (/Missing script:|command not found|No such file or directory|ENOENT/i.test(combined)) {
     return "missing_command_or_file";
+  }
+  return null;
+}
+function parseStructuredResultLine(line) {
+  try {
+    const parsed = JSON.parse(line);
+    if (typeof parsed.nonce === "string" && (parsed.status === "assertion_failed" || parsed.status === "assertion_passed" || parsed.status === "setup_error")) {
+      return {
+        nonce: parsed.nonce,
+        status: parsed.status
+      };
+    }
+  } catch {
+    return null;
   }
   return null;
 }
@@ -13675,6 +13793,7 @@ function redactText(text, redactedValues) {
 // ../core/src/verify.ts
 var import_node_crypto2 = require("crypto");
 var import_promises5 = require("fs/promises");
+var import_node_os = require("os");
 var import_node_path5 = require("path");
 
 // ../runner/src/index.ts
@@ -13688,10 +13807,8 @@ var SAFE_ENV_KEYS = /* @__PURE__ */ new Set([
   "CI",
   "FORCE_COLOR",
   "GITHUB_ACTIONS",
-  "GITHUB_WORKSPACE",
   "LANG",
   "LC_ALL",
-  "LOGNAME",
   "NO_COLOR",
   "PATH",
   "PNPM_HOME",
@@ -13699,8 +13816,7 @@ var SAFE_ENV_KEYS = /* @__PURE__ */ new Set([
   "SHELL",
   "TEMP",
   "TMP",
-  "TMPDIR",
-  "USER"
+  "TMPDIR"
 ]);
 function createCommandEnvironment(source = process.env, options = []) {
   const passthrough = isStringArray(options) ? options : options.passthrough ?? [];
@@ -13854,9 +13970,7 @@ var VerificationRuntimeError = class extends Error {
 async function verifyPatchProof(options) {
   const repoPath = (0, import_node_path5.resolve)(options.repoPath);
   const proofDir = options.proofDir ?? (0, import_node_path5.join)(repoPath, ".patchproof");
-  const worktreeRoot = (0, import_node_path5.join)(proofDir, "worktrees", `${Date.now()}-${process.pid}`);
-  const tmpRoot = (0, import_node_path5.join)(proofDir, "tmp", `${Date.now()}-${process.pid}`);
-  const worktrees = [];
+  let proof;
   try {
     const [baseSha, headSha] = await Promise.all([
       resolveCommit(repoPath, options.baseRef),
@@ -13868,89 +13982,120 @@ async function verifyPatchProof(options) {
     const headConfigBlobSha = await tryGetGitBlobSha(repoPath, headSha, configPath);
     const policyChanged = headConfigBlobSha !== loadedConfig.blobSha;
     const changedFiles = await listChangedFiles(repoPath, baseSha, headSha);
-    const baseReproductionWorktree = await createWorktree(
+    const harnessFiles = await collectHarnessEvidence(
       repoPath,
-      worktreeRoot,
-      "base-reproduce",
-      options.baseRef,
-      baseSha
+      baseSha,
+      headSha,
+      config.commands.reproduce.harness_files
     );
-    const headReproductionWorktree = await createWorktree(
+    const harnessChanged = harnessFiles.some((file) => file.changed);
+    const baseNonce = (0, import_node_crypto2.randomUUID)();
+    const baseReproductionStage = await runStage({
       repoPath,
-      worktreeRoot,
-      "head-reproduce",
-      options.headRef,
-      headSha
+      proofDir,
+      ref: options.baseRef,
+      sha: baseSha,
+      label: "base-reproduce",
+      command: config.commands.reproduce.run,
+      outputLimitBytes: config.output.limit_bytes,
+      timeoutMs: config.commands.reproduce.timeout_ms,
+      envOverrides: {
+        PATCHPROOF_NONCE: baseNonce
+      }
+    });
+    const baseStructured = parseStructuredReproductionResult(
+      baseReproductionStage.result,
+      baseNonce
     );
-    const headTestWorktree = await createWorktree(
+    const headNonce = (0, import_node_crypto2.randomUUID)();
+    const headReproductionStage = await runStage({
       repoPath,
-      worktreeRoot,
-      "head-test",
-      options.headRef,
-      headSha
+      proofDir,
+      ref: options.headRef,
+      sha: headSha,
+      label: "head-reproduce",
+      command: config.commands.reproduce.run,
+      outputLimitBytes: config.output.limit_bytes,
+      timeoutMs: config.commands.reproduce.timeout_ms,
+      envOverrides: {
+        PATCHPROOF_NONCE: headNonce
+      },
+      beforeRun: async (worktreePath) => {
+        await writeBaseHarnessFiles(repoPath, baseSha, worktreePath, harnessFiles);
+      }
+    });
+    const headStructured = parseStructuredReproductionResult(
+      headReproductionStage.result,
+      headNonce
     );
-    worktrees.push(baseReproductionWorktree, headReproductionWorktree, headTestWorktree);
-    const riskPatterns = await collectRiskPatterns(
-      headTestWorktree.path,
-      options.adapters ?? [],
-      config.risk.dependency_files,
-      config.risk.public_api_files
-    );
+    let riskPatterns;
+    const headTestStage = await runStage({
+      repoPath,
+      proofDir,
+      ref: options.headRef,
+      sha: headSha,
+      label: "head-test",
+      command: config.commands.test.run,
+      outputLimitBytes: config.output.limit_bytes,
+      timeoutMs: config.commands.test.timeout_ms,
+      beforeRun: async (worktreePath) => {
+        riskPatterns = await collectRiskPatterns(
+          worktreePath,
+          options.adapters ?? [],
+          config.risk.dependency_files,
+          config.risk.public_api_files
+        );
+      }
+    });
+    if (!riskPatterns) {
+      throw new VerificationRuntimeError("Could not collect risk patterns from head worktree");
+    }
     const dependencyChangedFiles = matchChangedFiles(changedFiles, riskPatterns.dependency);
     const publicApiChangedFiles = matchChangedFiles(changedFiles, riskPatterns.publicApi);
-    const redactedValues = collectRedactedValues(process.env);
-    const baseReproductionResult = await runCommand({
-      command: config.commands.reproduce.run,
-      cwd: baseReproductionWorktree.path,
-      env: await createStageEnvironment(tmpRoot, "base-reproduce"),
-      outputLimitBytes: config.output.limit_bytes,
-      timeoutMs: config.commands.reproduce.timeout_ms
-    });
-    const headReproductionResult = await runCommand({
-      command: config.commands.reproduce.run,
-      cwd: headReproductionWorktree.path,
-      env: await createStageEnvironment(tmpRoot, "head-reproduce"),
-      outputLimitBytes: config.output.limit_bytes,
-      timeoutMs: config.commands.reproduce.timeout_ms
-    });
-    const headTestResult = await runCommand({
-      command: config.commands.test.run,
-      cwd: headTestWorktree.path,
-      env: await createStageEnvironment(tmpRoot, "head-test"),
-      outputLimitBytes: config.output.limit_bytes,
-      timeoutMs: config.commands.test.timeout_ms
-    });
     const baseReproduction = toCommandEvidence(
       "reproduce:base",
-      baseReproductionResult,
+      baseReproductionStage.result,
       baseSha,
       config.commands.reproduce.expected_exit_code.base,
-      { cwd: ".", redactedValues }
+      {
+        cwd: ".",
+        infrastructureErrorReason: baseStructured.infrastructureErrorReason,
+        passOverride: baseStructured.structuredResult?.status === expectedReproductionStatus("base") && baseReproductionStage.result.exitCode === config.commands.reproduce.expected_exit_code.base,
+        redactedValues: baseReproductionStage.redactedValues,
+        structuredResult: baseStructured.structuredResult
+      }
     );
     const headReproduction = toCommandEvidence(
       "reproduce:head",
-      headReproductionResult,
+      headReproductionStage.result,
       headSha,
       config.commands.reproduce.expected_exit_code.head,
-      { cwd: ".", redactedValues }
+      {
+        cwd: ".",
+        infrastructureErrorReason: headStructured.infrastructureErrorReason,
+        passOverride: headStructured.structuredResult?.status === expectedReproductionStatus("head") && headReproductionStage.result.exitCode === config.commands.reproduce.expected_exit_code.head,
+        redactedValues: headReproductionStage.redactedValues,
+        structuredResult: headStructured.structuredResult
+      }
     );
     const headTests = toCommandEvidence(
       "test:head",
-      headTestResult,
+      headTestStage.result,
       headSha,
       config.commands.test.expected_exit_code,
-      { cwd: ".", redactedValues }
+      { cwd: ".", redactedValues: headTestStage.redactedValues }
     );
     const determinations = evaluateDeterminations({
       baseReproduction,
       dependencyChangedFiles,
+      harnessChanged,
       headReproduction,
       headTests,
       policyChanged,
       publicApiChangedFiles
     });
     const verdict = evaluateVerdict(determinations);
-    const proof = validateProof({
+    proof = validateProof({
       schema_version: 1,
       patchproof_version: PATCHPROOF_VERSION,
       generated_at: (/* @__PURE__ */ new Date()).toISOString(),
@@ -13969,6 +14114,10 @@ async function verifyPatchProof(options) {
         policy_changed: policyChanged
       },
       config_path: loadedConfig.path,
+      harness: {
+        files: harnessFiles,
+        changed: harnessChanged
+      },
       environment: {
         platform: process.platform,
         node_version: process.version
@@ -13995,18 +14144,15 @@ async function verifyPatchProof(options) {
         verdict_influence: "none"
       }
     });
-    const paths = await writeProofFiles(proof, proofDir);
-    return {
-      proof,
-      ...paths,
-      exitCode: proofExitCode(proof)
-    };
   } catch (error) {
     throw new VerificationRuntimeError("PatchProof verification failed at runtime", error);
-  } finally {
-    await Promise.allSettled(worktrees.map((worktree) => removeWorktree(repoPath, worktree.path)));
-    await (0, import_promises5.rm)(tmpRoot, { force: true, recursive: true });
   }
+  const paths = await writeProofFiles(proof, proofDir);
+  return {
+    proof,
+    ...paths,
+    exitCode: proofExitCode(proof)
+  };
 }
 async function writeProofFiles(proof, proofDir) {
   await (0, import_promises5.mkdir)(proofDir, { recursive: true });
@@ -14016,17 +14162,68 @@ async function writeProofFiles(proof, proofDir) {
   await (0, import_promises5.writeFile)(proofMarkdownPath, renderMarkdownReport(proof), "utf8");
   return { proofJsonPath, proofMarkdownPath };
 }
-async function createStageEnvironment(tmpRoot, stageName) {
-  const stageTmp = (0, import_node_path5.join)(tmpRoot, `${stageName}-${(0, import_node_crypto2.randomUUID)()}`);
+async function runStage(options) {
+  const stageRoot = await (0, import_promises5.mkdtemp)((0, import_node_path5.join)((0, import_node_os.tmpdir)(), `patchproof-${options.label}-`));
+  let worktreePath;
+  try {
+    const worktree = await createWorktree(
+      options.repoPath,
+      stageRoot,
+      options.label,
+      options.ref,
+      options.sha
+    );
+    worktreePath = worktree.path;
+    await options.beforeRun?.(worktree.path);
+    const stageEnvironment = await createStageEnvironment(
+      stageRoot,
+      options.label,
+      [options.proofDir, options.repoPath, stageRoot, worktree.path],
+      {
+        PATCHPROOF_STAGE: options.label,
+        ...options.envOverrides
+      }
+    );
+    const result = await runCommand({
+      command: options.command,
+      cwd: worktree.path,
+      env: stageEnvironment.env,
+      outputLimitBytes: options.outputLimitBytes,
+      timeoutMs: options.timeoutMs
+    });
+    return {
+      result,
+      redactedValues: stageEnvironment.redactedValues
+    };
+  } finally {
+    if (worktreePath) {
+      await removeWorktree(options.repoPath, worktreePath);
+    }
+    await (0, import_promises5.rm)(stageRoot, { force: true, recursive: true });
+  }
+}
+async function createStageEnvironment(stageRoot, stageName, additionalRedactedValues, overrides = {}) {
+  const stageTmp = (0, import_node_path5.join)(stageRoot, `${stageName}-${(0, import_node_crypto2.randomUUID)()}`);
   await (0, import_promises5.mkdir)(stageTmp, { recursive: true });
-  return createCommandEnvironment(process.env, {
+  const env = createCommandEnvironment(process.env, {
     overrides: {
       HOME: stageTmp,
       TEMP: stageTmp,
       TMP: stageTmp,
-      TMPDIR: stageTmp
+      TMPDIR: stageTmp,
+      ...overrides
     }
   });
+  return {
+    env,
+    redactedValues: [
+      ...collectRedactedValues(env),
+      ...Object.values(overrides).filter((value) => value !== void 0),
+      stageRoot,
+      stageTmp,
+      ...additionalRedactedValues
+    ]
+  };
 }
 function collectRedactedValues(env) {
   return Object.entries(env).filter((entry) => {
@@ -14034,10 +14231,34 @@ function collectRedactedValues(env) {
     return value !== void 0 && value.length >= 4 && (SECRET_ENV_NAME_PATTERN.test(key) || SECRET_VALUE_PATTERN.test(value));
   }).map(([, value]) => value);
 }
+async function collectHarnessEvidence(repoPath, baseSha, headSha, files) {
+  return await Promise.all(
+    files.map(async (path2) => {
+      const baseBlobSha = await getGitBlobSha(repoPath, baseSha, path2);
+      const headBlobSha = await tryGetGitBlobSha(repoPath, headSha, path2);
+      return {
+        path: path2,
+        base_blob_sha: baseBlobSha,
+        head_blob_sha: headBlobSha,
+        changed: headBlobSha !== baseBlobSha
+      };
+    })
+  );
+}
+async function writeBaseHarnessFiles(repoPath, baseSha, worktreePath, files) {
+  await Promise.all(
+    files.map(async (file) => {
+      const target = (0, import_node_path5.join)(worktreePath, file.path);
+      await (0, import_promises5.mkdir)((0, import_node_path5.dirname)(target), { recursive: true });
+      await (0, import_promises5.writeFile)(target, await readGitFile(repoPath, baseSha, file.path));
+    })
+  );
+}
 
 // src/index.ts
 async function runAction() {
   const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
+  const repoPath = inputEnv("repo-path", "REPO_PATH") ?? process.env.PATCHPROOF_REPO_PATH ?? workspace;
   const baseRef = inputEnv("base-ref", "BASE_REF") ?? requiredEnv("PATCHPROOF_BASE_REF");
   const headRef = inputEnv("head-ref", "HEAD_REF") ?? requiredEnv("PATCHPROOF_HEAD_REF");
   const configPath = inputEnv("config", "CONFIG") ?? process.env.PATCHPROOF_CONFIG ?? DEFAULT_CONFIG_FILE;
@@ -14046,7 +14267,7 @@ async function runAction() {
     baseRef,
     configPath,
     headRef,
-    repoPath: workspace
+    repoPath
   });
   const summaryPath = process.env.GITHUB_STEP_SUMMARY;
   if (summaryPath) {

@@ -33,23 +33,58 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Resolve refs
-        id: refs
+      - name: Create semantic fixture repository
+        id: fixture
         shell: bash
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            echo "base=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
-            echo "head=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ github.event.before }}" ] && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
-            echo "base=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
-            echo "head=${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "base=HEAD~1" >> "$GITHUB_OUTPUT"
-            echo "head=HEAD" >> "$GITHUB_OUTPUT"
-          fi
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/patchproof-action-fixture"
+          mkdir -p "$fixture"
+          cd "$fixture"
+          git init --initial-branch=main
+          git config user.name "PatchProof Action Test"
+          git config user.email "action-test@patchproof.local"
+          cat > patchproof.yml <<'YAML'
+          version: 1
+          commands:
+            reproduce:
+              run: node reproduce.js
+              harness_files:
+                - reproduce.js
+              expected_exit_code:
+                base: 1
+                head: 0
+            test:
+              run: node test.js
+          YAML
+          cat > app.js <<'JS'
+          exports.fixed = () => false;
+          JS
+          cat > reproduce.js <<'JS'
+          const { fixed } = require("./app.js");
+          const status = fixed() ? "assertion_passed" : "assertion_failed";
+          console.log(JSON.stringify({ nonce: process.env.PATCHPROOF_NONCE, status }));
+          process.exit(status === "assertion_passed" ? 0 : 1);
+          JS
+          cat > test.js <<'JS'
+          process.exit(0);
+          JS
+          git add .
+          git commit -m "base bug"
+          base="$(git rev-parse HEAD)"
+          cat > app.js <<'JS'
+          exports.fixed = () => true;
+          JS
+          git add app.js
+          git commit -m "head fix"
+          head="$(git rev-parse HEAD)"
+          echo "repo=$fixture" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
 
       - name: PatchProof verify
         uses: ./packages/github-action
         with:
-          base-ref: ${{ steps.refs.outputs.base }}
-          head-ref: ${{ steps.refs.outputs.head }}
+          repo-path: ${{ steps.fixture.outputs.repo }}
+          base-ref: ${{ steps.fixture.outputs.base }}
+          head-ref: ${{ steps.fixture.outputs.head }}

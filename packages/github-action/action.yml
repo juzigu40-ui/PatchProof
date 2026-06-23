@@ -11,6 +11,9 @@ inputs:
     description: "Path to patchproof.yml."
     required: false
     default: "patchproof.yml"
+  repo-path:
+    description: "Repository path to verify. Defaults to GITHUB_WORKSPACE."
+    required: false
 runs:
   using: "node24"
   main: "dist/index.cjs"

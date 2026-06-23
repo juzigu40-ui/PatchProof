@@ -45,6 +45,13 @@ PatchProof reads `patchproof.yml` from the base commit for the current verdict a
 trusted config blob SHA in `proof.json`; policy edits in the pull request are reported as
 `policy_changed`.
 
+The base config must list trusted reproduction harness files under
+`commands.reproduce.harness_files`. Reproduction commands must emit a JSON line containing
+`PATCHPROOF_NONCE` and one of `assertion_failed`, `assertion_passed`, or `setup_error`.
+
+The optional `repo-path` input lets CI run the local action against a generated fixture repository
+for semantic E2E checks.
+
 ## Optional summary job
 
 Posting a summary can be separated into a distinct job with explicitly scoped permissions. Keep it
