@@ -20,27 +20,46 @@ The v0.1 verifier reads `patchproof.yml` from the trusted base commit, not from 
 head. The proof records the trusted config path, source commit, blob SHA, and whether the head
 commit changed the policy file.
 
-It then runs:
+The base config must list `commands.reproduce.harness_files`. PatchProof records each trusted
+harness file's base and head Git blob SHA. Head changes to those files set `harness_changed` and
+block a verified verdict. For head reproduction, PatchProof overwrites the listed harness files with
+the base commit versions before executing the command.
+
+It then runs each stage in sequence:
 
 1. the reproduction command in a base-only disposable worktree,
 2. the reproduction command in a head-only disposable worktree,
 3. the test command in a separate head-only disposable worktree.
 
-By default, reproduction is considered successful when the configured command exits with code `1` on
-base and `0` on head. Tests are considered successful when the configured test command exits with
-code `0` on head. Repositories may configure different expected exit codes explicitly in
-`patchproof.yml`.
+Later worktrees are not created until earlier command processes have exited and their temporary
+worktree roots have been removed.
+
+Reproduction commands must emit exactly one line of JSON with the nonce PatchProof supplies in
+`PATCHPROOF_NONCE`:
+
+```json
+{ "nonce": "...", "status": "assertion_failed" }
+```
+
+Allowed statuses are `assertion_failed`, `assertion_passed`, and `setup_error`. Base reproduction
+requires `assertion_failed`; head reproduction requires `assertion_passed`. Missing JSON, invalid
+JSON, multiple structured results, nonce mismatch, or `setup_error` are infrastructure errors.
+Configured reproduction exit codes must also match the base policy expectations; the structured
+result distinguishes assertion state from setup failure, and the exit code remains an explicit rule.
+Tests are considered successful when the configured test command exits with its expected code on
+head.
 
 The final verdict is verified only when:
 
 - the bug is reproduced on base,
 - the reproduction no longer fails on head,
 - tests pass on head,
+- the trusted harness did not change on head,
 - no command ended in a classified infrastructure error.
 
-Infrastructure errors include timeouts, signals, missing commands or files, missing Node modules,
-and missing Python modules. Infrastructure errors are never accepted as successful bug reproduction,
-even when the exit code matches the configured expectation.
+Infrastructure errors include structured-protocol failures, timeouts, signals, missing commands or
+files, missing Node modules, and missing Python modules. Infrastructure errors are never accepted as
+successful bug reproduction, even when an exit code matches the configured expectation.
 
 Dependency-file and public-API changes are reported as risk signals. They do not automatically fail
 v0.1 verification.
@@ -54,7 +73,8 @@ verification. Each command runs with a temporary `HOME` and a restricted environ
 
 PatchProof sends timeout signals to the command process group and follows with `SIGKILL` after a
 short grace period. This is process isolation, not a sandbox. Do not run untrusted pull request
-verification on persistent self-hosted runners.
+verification on persistent self-hosted runners. Container or cgroup-backed isolation is still
+required before treating v0.1 as stable for hostile code.
 
 Codex integration can summarize already captured evidence and suggest missing tests, but it cannot
 change deterministic verdict fields or exit codes.

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import {
   createCommandEnvironment,
   createWorktree,
@@ -11,17 +12,21 @@ import {
 } from "@patchproof/runner";
 import {
   DEFAULT_CONFIG_FILE,
+  getGitBlobSha,
   loadPatchProofConfigFromGit,
+  readGitFile,
   tryGetGitBlobSha
 } from "@patchproof/config";
-import type { Proof } from "./schema.js";
+import type { HarnessFileEvidence, Proof } from "./schema.js";
 import { validateProof } from "./schema.js";
 import { renderJsonReport, renderMarkdownReport } from "./report.js";
-import type { RepositoryAdapter } from "./risk.js";
+import type { RepositoryAdapter, RiskPatterns } from "./risk.js";
 import { collectRiskPatterns, matchChangedFiles } from "./risk.js";
 import {
   evaluateDeterminations,
   evaluateVerdict,
+  expectedReproductionStatus,
+  parseStructuredReproductionResult,
   proofExitCode,
   toCommandEvidence
 } from "./verdict.js";
@@ -60,9 +65,7 @@ export class VerificationRuntimeError extends Error {
 export async function verifyPatchProof(options: VerifyOptions): Promise<VerifyResult> {
   const repoPath = resolve(options.repoPath);
   const proofDir = options.proofDir ?? join(repoPath, ".patchproof");
-  const worktreeRoot = join(proofDir, "worktrees", `${Date.now()}-${process.pid}`);
-  const tmpRoot = join(proofDir, "tmp", `${Date.now()}-${process.pid}`);
-  const worktrees: { path: string }[] = [];
+  let proof: Proof;
 
   try {
     const [baseSha, headSha] = await Promise.all([
@@ -75,87 +78,125 @@ export async function verifyPatchProof(options: VerifyOptions): Promise<VerifyRe
     const headConfigBlobSha = await tryGetGitBlobSha(repoPath, headSha, configPath);
     const policyChanged = headConfigBlobSha !== loadedConfig.blobSha;
     const changedFiles = await listChangedFiles(repoPath, baseSha, headSha);
+    const harnessFiles = await collectHarnessEvidence(
+      repoPath,
+      baseSha,
+      headSha,
+      config.commands.reproduce.harness_files
+    );
+    const harnessChanged = harnessFiles.some((file) => file.changed);
 
-    const baseReproductionWorktree = await createWorktree(
+    const baseNonce = randomUUID();
+    const baseReproductionStage = await runStage({
       repoPath,
-      worktreeRoot,
-      "base-reproduce",
-      options.baseRef,
-      baseSha
+      proofDir,
+      ref: options.baseRef,
+      sha: baseSha,
+      label: "base-reproduce",
+      command: config.commands.reproduce.run,
+      outputLimitBytes: config.output.limit_bytes,
+      timeoutMs: config.commands.reproduce.timeout_ms,
+      envOverrides: {
+        PATCHPROOF_NONCE: baseNonce
+      }
+    });
+    const baseStructured = parseStructuredReproductionResult(
+      baseReproductionStage.result,
+      baseNonce
     );
-    const headReproductionWorktree = await createWorktree(
-      repoPath,
-      worktreeRoot,
-      "head-reproduce",
-      options.headRef,
-      headSha
-    );
-    const headTestWorktree = await createWorktree(
-      repoPath,
-      worktreeRoot,
-      "head-test",
-      options.headRef,
-      headSha
-    );
-    worktrees.push(baseReproductionWorktree, headReproductionWorktree, headTestWorktree);
 
-    const riskPatterns = await collectRiskPatterns(
-      headTestWorktree.path,
-      options.adapters ?? [],
-      config.risk.dependency_files,
-      config.risk.public_api_files
+    const headNonce = randomUUID();
+    const headReproductionStage = await runStage({
+      repoPath,
+      proofDir,
+      ref: options.headRef,
+      sha: headSha,
+      label: "head-reproduce",
+      command: config.commands.reproduce.run,
+      outputLimitBytes: config.output.limit_bytes,
+      timeoutMs: config.commands.reproduce.timeout_ms,
+      envOverrides: {
+        PATCHPROOF_NONCE: headNonce
+      },
+      beforeRun: async (worktreePath) => {
+        await writeBaseHarnessFiles(repoPath, baseSha, worktreePath, harnessFiles);
+      }
+    });
+    const headStructured = parseStructuredReproductionResult(
+      headReproductionStage.result,
+      headNonce
     );
+
+    let riskPatterns: RiskPatterns | undefined;
+    const headTestStage = await runStage({
+      repoPath,
+      proofDir,
+      ref: options.headRef,
+      sha: headSha,
+      label: "head-test",
+      command: config.commands.test.run,
+      outputLimitBytes: config.output.limit_bytes,
+      timeoutMs: config.commands.test.timeout_ms,
+      beforeRun: async (worktreePath) => {
+        riskPatterns = await collectRiskPatterns(
+          worktreePath,
+          options.adapters ?? [],
+          config.risk.dependency_files,
+          config.risk.public_api_files
+        );
+      }
+    });
+    if (!riskPatterns) {
+      throw new VerificationRuntimeError("Could not collect risk patterns from head worktree");
+    }
+
     const dependencyChangedFiles = matchChangedFiles(changedFiles, riskPatterns.dependency);
     const publicApiChangedFiles = matchChangedFiles(changedFiles, riskPatterns.publicApi);
-    const redactedValues = collectRedactedValues(process.env);
-
-    const baseReproductionResult = await runCommand({
-      command: config.commands.reproduce.run,
-      cwd: baseReproductionWorktree.path,
-      env: await createStageEnvironment(tmpRoot, "base-reproduce"),
-      outputLimitBytes: config.output.limit_bytes,
-      timeoutMs: config.commands.reproduce.timeout_ms
-    });
-    const headReproductionResult = await runCommand({
-      command: config.commands.reproduce.run,
-      cwd: headReproductionWorktree.path,
-      env: await createStageEnvironment(tmpRoot, "head-reproduce"),
-      outputLimitBytes: config.output.limit_bytes,
-      timeoutMs: config.commands.reproduce.timeout_ms
-    });
-    const headTestResult = await runCommand({
-      command: config.commands.test.run,
-      cwd: headTestWorktree.path,
-      env: await createStageEnvironment(tmpRoot, "head-test"),
-      outputLimitBytes: config.output.limit_bytes,
-      timeoutMs: config.commands.test.timeout_ms
-    });
 
     const baseReproduction = toCommandEvidence(
       "reproduce:base",
-      baseReproductionResult,
+      baseReproductionStage.result,
       baseSha,
       config.commands.reproduce.expected_exit_code.base,
-      { cwd: ".", redactedValues }
+      {
+        cwd: ".",
+        infrastructureErrorReason: baseStructured.infrastructureErrorReason,
+        passOverride:
+          baseStructured.structuredResult?.status === expectedReproductionStatus("base") &&
+          baseReproductionStage.result.exitCode ===
+            config.commands.reproduce.expected_exit_code.base,
+        redactedValues: baseReproductionStage.redactedValues,
+        structuredResult: baseStructured.structuredResult
+      }
     );
     const headReproduction = toCommandEvidence(
       "reproduce:head",
-      headReproductionResult,
+      headReproductionStage.result,
       headSha,
       config.commands.reproduce.expected_exit_code.head,
-      { cwd: ".", redactedValues }
+      {
+        cwd: ".",
+        infrastructureErrorReason: headStructured.infrastructureErrorReason,
+        passOverride:
+          headStructured.structuredResult?.status === expectedReproductionStatus("head") &&
+          headReproductionStage.result.exitCode ===
+            config.commands.reproduce.expected_exit_code.head,
+        redactedValues: headReproductionStage.redactedValues,
+        structuredResult: headStructured.structuredResult
+      }
     );
     const headTests = toCommandEvidence(
       "test:head",
-      headTestResult,
+      headTestStage.result,
       headSha,
       config.commands.test.expected_exit_code,
-      { cwd: ".", redactedValues }
+      { cwd: ".", redactedValues: headTestStage.redactedValues }
     );
 
     const determinations = evaluateDeterminations({
       baseReproduction,
       dependencyChangedFiles,
+      harnessChanged,
       headReproduction,
       headTests,
       policyChanged,
@@ -163,7 +204,7 @@ export async function verifyPatchProof(options: VerifyOptions): Promise<VerifyRe
     });
     const verdict = evaluateVerdict(determinations);
 
-    const proof = validateProof({
+    proof = validateProof({
       schema_version: 1,
       patchproof_version: PATCHPROOF_VERSION,
       generated_at: new Date().toISOString(),
@@ -182,6 +223,10 @@ export async function verifyPatchProof(options: VerifyOptions): Promise<VerifyRe
         policy_changed: policyChanged
       },
       config_path: loadedConfig.path,
+      harness: {
+        files: harnessFiles,
+        changed: harnessChanged
+      },
       environment: {
         platform: process.platform,
         node_version: process.version
@@ -208,19 +253,16 @@ export async function verifyPatchProof(options: VerifyOptions): Promise<VerifyRe
         verdict_influence: "none"
       }
     });
-
-    const paths = await writeProofFiles(proof, proofDir);
-    return {
-      proof,
-      ...paths,
-      exitCode: proofExitCode(proof)
-    };
   } catch (error) {
     throw new VerificationRuntimeError("PatchProof verification failed at runtime", error);
-  } finally {
-    await Promise.allSettled(worktrees.map((worktree) => removeWorktree(repoPath, worktree.path)));
-    await rm(tmpRoot, { force: true, recursive: true });
   }
+
+  const paths = await writeProofFiles(proof, proofDir);
+  return {
+    proof,
+    ...paths,
+    exitCode: proofExitCode(proof)
+  };
 }
 
 export async function writeProofFiles(
@@ -240,20 +282,94 @@ export async function loadProof(proofPath: string): Promise<Proof> {
   return validateProof(JSON.parse(raw));
 }
 
+interface StageRunOptions {
+  repoPath: string;
+  proofDir: string;
+  ref: string;
+  sha: string;
+  label: string;
+  command: string;
+  timeoutMs: number;
+  outputLimitBytes: number;
+  envOverrides?: NodeJS.ProcessEnv;
+  beforeRun?(worktreePath: string): Promise<void>;
+}
+
+interface StageRunResult {
+  result: Awaited<ReturnType<typeof runCommand>>;
+  redactedValues: string[];
+}
+
+async function runStage(options: StageRunOptions): Promise<StageRunResult> {
+  const stageRoot = await mkdtemp(join(tmpdir(), `patchproof-${options.label}-`));
+  let worktreePath: string | undefined;
+
+  try {
+    const worktree = await createWorktree(
+      options.repoPath,
+      stageRoot,
+      options.label,
+      options.ref,
+      options.sha
+    );
+    worktreePath = worktree.path;
+    await options.beforeRun?.(worktree.path);
+    const stageEnvironment = await createStageEnvironment(
+      stageRoot,
+      options.label,
+      [options.proofDir, options.repoPath, stageRoot, worktree.path],
+      {
+        PATCHPROOF_STAGE: options.label,
+        ...options.envOverrides
+      }
+    );
+    const result = await runCommand({
+      command: options.command,
+      cwd: worktree.path,
+      env: stageEnvironment.env,
+      outputLimitBytes: options.outputLimitBytes,
+      timeoutMs: options.timeoutMs
+    });
+
+    return {
+      result,
+      redactedValues: stageEnvironment.redactedValues
+    };
+  } finally {
+    if (worktreePath) {
+      await removeWorktree(options.repoPath, worktreePath);
+    }
+    await rm(stageRoot, { force: true, recursive: true });
+  }
+}
+
 async function createStageEnvironment(
-  tmpRoot: string,
-  stageName: string
-): Promise<NodeJS.ProcessEnv> {
-  const stageTmp = join(tmpRoot, `${stageName}-${randomUUID()}`);
+  stageRoot: string,
+  stageName: string,
+  additionalRedactedValues: readonly string[],
+  overrides: NodeJS.ProcessEnv = {}
+): Promise<{ env: NodeJS.ProcessEnv; redactedValues: string[] }> {
+  const stageTmp = join(stageRoot, `${stageName}-${randomUUID()}`);
   await mkdir(stageTmp, { recursive: true });
-  return createCommandEnvironment(process.env, {
+  const env = createCommandEnvironment(process.env, {
     overrides: {
       HOME: stageTmp,
       TEMP: stageTmp,
       TMP: stageTmp,
-      TMPDIR: stageTmp
+      TMPDIR: stageTmp,
+      ...overrides
     }
   });
+  return {
+    env,
+    redactedValues: [
+      ...collectRedactedValues(env),
+      ...Object.values(overrides).filter((value): value is string => value !== undefined),
+      stageRoot,
+      stageTmp,
+      ...additionalRedactedValues
+    ]
+  };
 }
 
 function collectRedactedValues(env: NodeJS.ProcessEnv): string[] {
@@ -267,4 +383,39 @@ function collectRedactedValues(env: NodeJS.ProcessEnv): string[] {
       );
     })
     .map(([, value]) => value);
+}
+
+async function collectHarnessEvidence(
+  repoPath: string,
+  baseSha: string,
+  headSha: string,
+  files: readonly string[]
+): Promise<HarnessFileEvidence[]> {
+  return await Promise.all(
+    files.map(async (path) => {
+      const baseBlobSha = await getGitBlobSha(repoPath, baseSha, path);
+      const headBlobSha = await tryGetGitBlobSha(repoPath, headSha, path);
+      return {
+        path,
+        base_blob_sha: baseBlobSha,
+        head_blob_sha: headBlobSha,
+        changed: headBlobSha !== baseBlobSha
+      };
+    })
+  );
+}
+
+async function writeBaseHarnessFiles(
+  repoPath: string,
+  baseSha: string,
+  worktreePath: string,
+  files: readonly HarnessFileEvidence[]
+): Promise<void> {
+  await Promise.all(
+    files.map(async (file) => {
+      const target = join(worktreePath, file.path);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, await readGitFile(repoPath, baseSha, file.path));
+    })
+  );
 }

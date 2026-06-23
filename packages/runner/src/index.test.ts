@@ -63,8 +63,11 @@ describe("runner", () => {
   it("creates a restricted environment with explicit passthrough", () => {
     const env = createCommandEnvironment(
       {
+        GITHUB_WORKSPACE: "/repo",
+        LOGNAME: "person",
         PATH: "/bin",
         SECRET_TOKEN: "no",
+        USER: "person",
         CUSTOM: "yes"
       },
       ["CUSTOM"]

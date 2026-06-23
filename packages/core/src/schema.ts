@@ -1,5 +1,27 @@
 import { z } from "zod";
 
+export const ReproductionStatusSchema = z.enum([
+  "assertion_failed",
+  "assertion_passed",
+  "setup_error"
+]);
+
+export const StructuredResultSchema = z
+  .object({
+    nonce: z.string(),
+    status: ReproductionStatusSchema
+  })
+  .strict();
+
+export const HarnessFileSchema = z
+  .object({
+    path: z.string(),
+    base_blob_sha: z.string(),
+    head_blob_sha: z.string().nullable(),
+    changed: z.boolean()
+  })
+  .strict();
+
 export const CommandEvidenceSchema = z
   .object({
     name: z.string(),
@@ -15,6 +37,7 @@ export const CommandEvidenceSchema = z
     stdout_truncated: z.boolean(),
     stderr_truncated: z.boolean(),
     timed_out: z.boolean(),
+    structured_result: StructuredResultSchema.nullable(),
     infrastructure_error: z.boolean(),
     infrastructure_error_reason: z.string().nullable(),
     passed: z.boolean()
@@ -45,6 +68,12 @@ export const ProofSchema = z
       })
       .strict(),
     config_path: z.string(),
+    harness: z
+      .object({
+        files: z.array(HarnessFileSchema),
+        changed: z.boolean()
+      })
+      .strict(),
     environment: z
       .object({
         platform: z.string(),
@@ -82,6 +111,7 @@ export const ProofSchema = z
         dependency_files_changed: z.boolean(),
         public_api_files_changed: z.boolean(),
         policy_changed: z.boolean(),
+        harness_changed: z.boolean(),
         infrastructure_error: z.boolean()
       })
       .strict(),
@@ -102,7 +132,10 @@ export const ProofSchema = z
   .strict();
 
 export type CommandEvidence = z.infer<typeof CommandEvidenceSchema>;
+export type HarnessFileEvidence = z.infer<typeof HarnessFileSchema>;
 export type Proof = z.infer<typeof ProofSchema>;
+export type ReproductionStatus = z.infer<typeof ReproductionStatusSchema>;
+export type StructuredResult = z.infer<typeof StructuredResultSchema>;
 
 export function validateProof(proof: unknown): Proof {
   return ProofSchema.parse(proof);

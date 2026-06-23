@@ -2,6 +2,8 @@ version: 1
 commands:
   reproduce:
     run: node reproduce.js
+    harness_files:
+      - reproduce.js
     expected_exit_code:
       base: 1
       head: 0

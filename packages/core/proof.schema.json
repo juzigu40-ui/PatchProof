@@ -11,6 +11,7 @@
     "repository",
     "config",
     "config_path",
+    "harness",
     "environment",
     "adapters",
     "commands",
@@ -48,6 +49,18 @@
       }
     },
     "config_path": { "type": "string" },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files", "changed"],
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/harnessFile" }
+        },
+        "changed": { "type": "boolean" }
+      }
+    },
     "environment": {
       "type": "object",
       "additionalProperties": false,
@@ -105,6 +118,7 @@
         "dependency_files_changed",
         "public_api_files_changed",
         "policy_changed",
+        "harness_changed",
         "infrastructure_error"
       ],
       "properties": {
@@ -114,6 +128,7 @@
         "dependency_files_changed": { "type": "boolean" },
         "public_api_files_changed": { "type": "boolean" },
         "policy_changed": { "type": "boolean" },
+        "harness_changed": { "type": "boolean" },
         "infrastructure_error": { "type": "boolean" }
       }
     },
@@ -155,6 +170,7 @@
         "stdout_truncated",
         "stderr_truncated",
         "timed_out",
+        "structured_result",
         "infrastructure_error",
         "infrastructure_error_reason",
         "passed"
@@ -177,11 +193,38 @@
         "stdout_truncated": { "type": "boolean" },
         "stderr_truncated": { "type": "boolean" },
         "timed_out": { "type": "boolean" },
+        "structured_result": {
+          "anyOf": [{ "$ref": "#/$defs/structuredResult" }, { "type": "null" }]
+        },
         "infrastructure_error": { "type": "boolean" },
         "infrastructure_error_reason": {
           "anyOf": [{ "type": "string" }, { "type": "null" }]
         },
         "passed": { "type": "boolean" }
+      }
+    },
+    "structuredResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nonce", "status"],
+      "properties": {
+        "nonce": { "type": "string" },
+        "status": {
+          "enum": ["assertion_failed", "assertion_passed", "setup_error"]
+        }
+      }
+    },
+    "harnessFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "base_blob_sha", "head_blob_sha", "changed"],
+      "properties": {
+        "path": { "type": "string" },
+        "base_blob_sha": { "type": "string" },
+        "head_blob_sha": {
+          "anyOf": [{ "type": "string" }, { "type": "null" }]
+        },
+        "changed": { "type": "boolean" }
       }
     }
   }

@@ -1,9 +1,15 @@
 version: 1
 commands:
   reproduce:
-    run: node -e "process.exit(0)"
+    run:
+      'node -e "const status = process.env.PATCHPROOF_STAGE === ''base-reproduce'' ?
+      ''assertion_failed'' : ''assertion_passed''; console.log(JSON.stringify({ nonce:
+      process.env.PATCHPROOF_NONCE, status })); process.exit(status === ''assertion_failed'' ? 1 :
+      0);"'
+    harness_files:
+      - patchproof.yml
     expected_exit_code:
-      base: 0
+      base: 1
       head: 0
   test:
     run: node -e "process.exit(0)"

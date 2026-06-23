@@ -37,6 +37,7 @@ function sampleProof(): Proof {
     stderr_truncated: false,
     stdout: "",
     stdout_truncated: false,
+    structured_result: null,
     timed_out: false
   };
 
@@ -71,11 +72,23 @@ function sampleProof(): Proof {
     determinations: {
       dependency_files_changed: false,
       fixed_on_head: false,
+      harness_changed: false,
       infrastructure_error: false,
       policy_changed: false,
       public_api_files_changed: false,
       reproduced_on_base: false,
       tests_passed: false
+    },
+    harness: {
+      changed: false,
+      files: [
+        {
+          base_blob_sha: "base-harness",
+          changed: false,
+          head_blob_sha: "base-harness",
+          path: "reproduce.js"
+        }
+      ]
     },
     environment: {
       node_version: "v22.0.0",

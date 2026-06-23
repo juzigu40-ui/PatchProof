@@ -24,3 +24,8 @@ local process.
 PatchProof reads policy from the trusted base commit and records the config blob SHA in the proof.
 `runtime.env_passthrough` is disabled for untrusted verification; command phases run with a
 temporary `HOME` and restricted environment.
+
+Reproduction commands must use base-listed trusted harness files and emit a nonce-bound structured
+result. Head changes to trusted harness files block a verified verdict. Current v0.1 process
+isolation is not a container sandbox; hostile-code deployments should wait for container/cgroup
+isolation before treating verification as stable.

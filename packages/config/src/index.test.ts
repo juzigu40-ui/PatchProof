@@ -10,7 +10,9 @@ import {
   getGitBlobSha,
   loadPatchProofConfigFromGit,
   loadPatchProofConfig,
+  normalizeRelativePath,
   PatchProofConfigSchema,
+  readGitFile,
   resolveConfigPath,
   tryGetGitBlobSha,
   writeInitialConfig
@@ -22,6 +24,7 @@ describe("config", () => {
   it("creates a default config that validates", () => {
     const config = createDefaultConfig();
     expect(PatchProofConfigSchema.parse(config).version).toBe(1);
+    expect(config.commands.reproduce.harness_files).toEqual(["patchproof.yml"]);
     expect(config.commands.reproduce.expected_exit_code.base).toBe(1);
     expect(config.commands.reproduce.expected_exit_code.head).toBe(0);
     expect(config.commands.test.expected_exit_code).toBe(0);
@@ -36,6 +39,8 @@ describe("config", () => {
         "commands:",
         "  reproduce:",
         "    run: node reproduce.js",
+        "    harness_files:",
+        "      - reproduce.js",
         "  test:",
         "    run: node test.js"
       ].join("\n"),
@@ -67,6 +72,8 @@ describe("config", () => {
         "commands:",
         "  reproduce:",
         "    run: node reproduce.js",
+        "    harness_files:",
+        "      - reproduce.js",
         "  test:",
         "    run: node test.js",
         "runtime:",
@@ -94,6 +101,8 @@ describe("config", () => {
         "commands:",
         "  reproduce:",
         "    run: node reproduce.js",
+        "    harness_files:",
+        "      - reproduce.js",
         "  test:",
         "    run: node test.js"
       ].join("\n"),
@@ -109,8 +118,21 @@ describe("config", () => {
     expect(loaded.sourceSha).toBe(sha);
     expect(loaded.blobSha).toMatch(/^[0-9a-f]{40,64}$/);
     await expect(getGitBlobSha(dir, sha)).resolves.toBe(loaded.blobSha);
+    expect((await readGitFile(dir, sha, "patchproof.yml")).toString("utf8")).toContain(
+      "version: 1"
+    );
     await expect(tryGetGitBlobSha(dir, sha, "missing.yml")).resolves.toBeNull();
     expect(loaded.config.commands.reproduce.run).toBe("node reproduce.js");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("wraps git errors when trusted config cannot be read", async () => {
+    const dir = await temporaryDirectory();
+    await execFileAsync("git", ["init", "--initial-branch=main"], { cwd: dir });
+
+    await expect(loadPatchProofConfigFromGit(dir, "missing-ref")).rejects.toMatchObject({
+      message: "Could not read trusted patchproof.yml from missing-ref"
+    });
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -130,14 +152,33 @@ describe("config", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it("normalizes and rejects unsafe repository relative paths", () => {
+    expect(normalizeRelativePath("dir/../reproduce.js")).toBe("reproduce.js");
+    expect(() => normalizeRelativePath(".")).toThrow("Path must name a file");
+    expect(() =>
+      PatchProofConfigSchema.parse({
+        version: 1,
+        commands: {
+          reproduce: {
+            run: "node reproduce.js",
+            harness_files: ["../reproduce.js"]
+          },
+          test: {
+            run: "node test.js"
+          }
+        }
+      })
+    ).toThrow("Path must stay inside the repository");
+  });
+
   it("rejects unsafe git config paths before reading repository content", async () => {
     const dir = await temporaryDirectory();
 
     await expect(loadPatchProofConfigFromGit(dir, "HEAD", "/tmp/patchproof.yml")).rejects.toThrow(
-      "Config path must be relative"
+      "Path must be relative"
     );
     await expect(loadPatchProofConfigFromGit(dir, "HEAD", "../patchproof.yml")).rejects.toThrow(
-      "Config path must stay inside the repository"
+      "Path must stay inside the repository"
     );
     await rm(dir, { recursive: true, force: true });
   });

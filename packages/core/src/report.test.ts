@@ -56,11 +56,23 @@ function sampleProof(): Proof {
     determinations: {
       dependency_files_changed: false,
       fixed_on_head: true,
+      harness_changed: false,
       infrastructure_error: false,
       policy_changed: false,
       public_api_files_changed: true,
       reproduced_on_base: true,
       tests_passed: true
+    },
+    harness: {
+      changed: false,
+      files: [
+        {
+          base_blob_sha: "base-harness",
+          changed: false,
+          head_blob_sha: "base-harness",
+          path: "reproduce.js"
+        }
+      ]
     },
     environment: {
       node_version: "v22.0.0",
@@ -101,6 +113,7 @@ function command(name: string, exitCode: number, expectedExitCode: number) {
     stderr_truncated: false,
     stdout: "",
     stdout_truncated: false,
+    structured_result: null,
     timed_out: false
   };
 }

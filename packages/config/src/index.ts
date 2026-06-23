@@ -7,6 +7,21 @@ import { z } from "zod";
 
 const execFileAsync = promisify(execFile);
 const exitCodeSchema = z.number().int().min(0).max(255);
+const relativePathSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .transform((value, ctx) => {
+    try {
+      return normalizeRelativePath(value);
+    } catch (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error instanceof Error ? error.message : "Path must be repository-relative"
+      });
+      return z.NEVER;
+    }
+  });
 
 export const PatchProofConfigSchema = z
   .object({
@@ -16,6 +31,9 @@ export const PatchProofConfigSchema = z
         reproduce: z
           .object({
             run: z.string().trim().min(1),
+            harness_files: z
+              .array(relativePathSchema)
+              .min(1, "commands.reproduce.harness_files must list trusted harness files"),
             timeout_ms: z.number().int().positive().max(3_600_000).default(30_000),
             expected_exit_code: z
               .object({
@@ -97,6 +115,7 @@ export function createDefaultConfig(): PatchProofConfig {
     commands: {
       reproduce: {
         run: "pnpm test -- --run patchproof-repro",
+        harness_files: ["patchproof.yml"],
         expected_exit_code: {
           base: 1,
           head: 0
@@ -208,6 +227,20 @@ export async function getGitBlobSha(
   return stdout.toString().trim();
 }
 
+export async function readGitFile(
+  repoPath: string,
+  ref: string,
+  filePath: string
+): Promise<Buffer> {
+  const safePath = normalizeRelativePath(filePath);
+  const { stdout } = await execFileAsync("git", ["show", `${ref}:${safePath}`], {
+    cwd: repoPath,
+    encoding: "buffer",
+    maxBuffer: 10 * 1024 * 1024
+  });
+  return Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
+}
+
 export async function tryGetGitBlobSha(
   repoPath: string,
   ref: string,
@@ -244,13 +277,20 @@ export function resolveConfigPath(cwd: string, configPath = DEFAULT_CONFIG_FILE)
 }
 
 function normalizeRelativeConfigPath(configPath: string): string {
-  if (isAbsolute(configPath)) {
-    throw new ConfigError("Config path must be relative");
+  return normalizeRelativePath(configPath);
+}
+
+export function normalizeRelativePath(path: string): string {
+  if (isAbsolute(path)) {
+    throw new ConfigError("Path must be relative");
   }
 
-  const normalized = normalize(configPath);
+  const normalized = normalize(path);
+  if (normalized === ".") {
+    throw new ConfigError("Path must name a file");
+  }
   if (normalized === ".." || normalized.startsWith(`..${sep}`)) {
-    throw new ConfigError("Config path must stay inside the repository");
+    throw new ConfigError("Path must stay inside the repository");
   }
 
   return normalized.replaceAll("\\", "/");

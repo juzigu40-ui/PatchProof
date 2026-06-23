@@ -22,6 +22,7 @@ export function renderMarkdownReport(proof: Proof): string {
     `- dependency_files_changed: ${validProof.determinations.dependency_files_changed}`,
     `- public_api_files_changed: ${validProof.determinations.public_api_files_changed}`,
     `- policy_changed: ${validProof.determinations.policy_changed}`,
+    `- harness_changed: ${validProof.determinations.harness_changed}`,
     `- infrastructure_error: ${validProof.determinations.infrastructure_error}`,
     "",
     "## Repository",
@@ -38,6 +39,14 @@ export function renderMarkdownReport(proof: Proof): string {
     `- source_sha: ${validProof.config.source_sha}`,
     `- blob_sha: ${validProof.config.blob_sha}`,
     `- policy_changed: ${validProof.config.policy_changed}`,
+    "",
+    "## Harness",
+    "",
+    `- changed: ${validProof.harness.changed}`,
+    ...validProof.harness.files.map(
+      (file) =>
+        `- ${file.path}: base=${file.base_blob_sha}, head=${file.head_blob_sha ?? "null"}, changed=${file.changed}`
+    ),
     "",
     "## Commands",
     "",
@@ -66,6 +75,7 @@ function commandSummary(label: string, command: Proof["commands"]["tests"]["head
     `- exit_code: ${command.exit_code ?? "null"}`,
     `- duration_ms: ${command.duration_ms}`,
     `- timed_out: ${command.timed_out}`,
+    `- structured_result: ${command.structured_result ? JSON.stringify(command.structured_result) : "null"}`,
     `- infrastructure_error: ${command.infrastructure_error}`,
     `- infrastructure_error_reason: ${command.infrastructure_error_reason ?? "null"}`,
     `- passed: ${command.passed}`,

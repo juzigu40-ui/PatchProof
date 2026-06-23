@@ -2,6 +2,8 @@ import type { CommandResult } from "@patchproof/runner";
 import {
   evaluateDeterminations,
   evaluateVerdict,
+  expectedReproductionStatus,
+  parseStructuredReproductionResult,
   proofExitCode,
   toCommandEvidence
 } from "./verdict.js";
@@ -13,6 +15,7 @@ describe("verdict", () => {
       headReproduction: evidence(true),
       headTests: evidence(true),
       dependencyChangedFiles: [],
+      harnessChanged: false,
       policyChanged: false,
       publicApiChangedFiles: ["index.ts"]
     });
@@ -20,6 +23,7 @@ describe("verdict", () => {
     expect(determinations).toEqual({
       reproduced_on_base: true,
       fixed_on_head: true,
+      harness_changed: false,
       infrastructure_error: false,
       tests_passed: true,
       dependency_files_changed: false,
@@ -38,6 +42,7 @@ describe("verdict", () => {
       fixed_on_head: true,
       tests_passed: true,
       dependency_files_changed: false,
+      harness_changed: false,
       infrastructure_error: false,
       policy_changed: false,
       public_api_files_changed: false
@@ -54,6 +59,7 @@ describe("verdict", () => {
       fixed_on_head: false,
       tests_passed: false,
       dependency_files_changed: false,
+      harness_changed: false,
       infrastructure_error: false,
       policy_changed: false,
       public_api_files_changed: false
@@ -70,6 +76,7 @@ describe("verdict", () => {
       fixed_on_head: true,
       tests_passed: true,
       dependency_files_changed: false,
+      harness_changed: false,
       infrastructure_error: true,
       policy_changed: false,
       public_api_files_changed: false
@@ -77,6 +84,22 @@ describe("verdict", () => {
 
     expect(verdict.status).toBe("failed");
     expect(verdict.reason).toContain("infrastructure error");
+  });
+
+  it("fails when the trusted harness changed", () => {
+    const verdict = evaluateVerdict({
+      reproduced_on_base: true,
+      fixed_on_head: true,
+      tests_passed: true,
+      dependency_files_changed: false,
+      harness_changed: true,
+      infrastructure_error: false,
+      policy_changed: false,
+      public_api_files_changed: false
+    });
+
+    expect(verdict.status).toBe("failed");
+    expect(verdict.reason).toContain("trusted reproduction harness changed");
   });
 
   it("converts command result to evidence", () => {
@@ -170,6 +193,41 @@ describe("verdict", () => {
     expect(evidence.stdout).toBe("abc [REDACTED]");
   });
 
+  it("parses nonce-bound structured reproduction results", () => {
+    expect(
+      parseStructuredReproductionResult(
+        commandResult({
+          stdout: JSON.stringify({ nonce: "n1", status: "assertion_failed" })
+        }),
+        "n1"
+      )
+    ).toEqual({
+      infrastructureErrorReason: null,
+      structuredResult: { nonce: "n1", status: "assertion_failed" }
+    });
+    expect(expectedReproductionStatus("base")).toBe("assertion_failed");
+    expect(expectedReproductionStatus("head")).toBe("assertion_passed");
+  });
+
+  it("treats missing or mismatched structured results as infrastructure errors", () => {
+    expect(
+      parseStructuredReproductionResult(commandResult({ stdout: "plain output" }), "n1")
+        .infrastructureErrorReason
+    ).toBe("structured_result_missing");
+    expect(
+      parseStructuredReproductionResult(
+        commandResult({ stdout: JSON.stringify({ nonce: "wrong", status: "assertion_passed" }) }),
+        "n1"
+      ).infrastructureErrorReason
+    ).toBe("structured_result_nonce_mismatch");
+    expect(
+      parseStructuredReproductionResult(
+        commandResult({ stdout: JSON.stringify({ nonce: "n1", status: "setup_error" }) }),
+        "n1"
+      ).infrastructureErrorReason
+    ).toBe("structured_result_setup_error");
+  });
+
   it("reads proof exit codes", () => {
     expect(proofExitCode({ verdict: { exit_code: 1 } } as never)).toBe(1);
   });
@@ -192,6 +250,7 @@ function evidence(passed: boolean) {
     stderr_truncated: false,
     stdout: "",
     stdout_truncated: false,
+    structured_result: null,
     timed_out: false
   };
 }

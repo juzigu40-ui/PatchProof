@@ -36,10 +36,8 @@ export const SAFE_ENV_KEYS = new Set([
   "CI",
   "FORCE_COLOR",
   "GITHUB_ACTIONS",
-  "GITHUB_WORKSPACE",
   "LANG",
   "LC_ALL",
-  "LOGNAME",
   "NO_COLOR",
   "PATH",
   "PNPM_HOME",
@@ -47,8 +45,7 @@ export const SAFE_ENV_KEYS = new Set([
   "SHELL",
   "TEMP",
   "TMP",
-  "TMPDIR",
-  "USER"
+  "TMPDIR"
 ]);
 
 export function createCommandEnvironment(
