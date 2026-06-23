@@ -46,8 +46,9 @@ trusted config blob SHA in `proof.json`; policy edits in the pull request are re
 `policy_changed`.
 
 The base config must list trusted reproduction harness files under
-`commands.reproduce.harness_files`. Reproduction commands must emit a JSON line containing
-`PATCHPROOF_NONCE` and one of `assertion_failed`, `assertion_passed`, or `setup_error`.
+`commands.reproduce.harness_files`, including trusted helper files. Reproduction commands read the
+challenge from fd 3 and write one JSON result line to fd 4 with one of `assertion_failed`,
+`assertion_passed`, or `setup_error`. `stdout` is not used for the deterministic verdict.
 
 The optional `repo-path` input lets CI run the local action against a generated fixture repository
 for semantic E2E checks.

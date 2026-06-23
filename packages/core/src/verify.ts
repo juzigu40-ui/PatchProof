@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import {
   createCommandEnvironment,
   createWorktree,
@@ -14,6 +14,7 @@ import {
   DEFAULT_CONFIG_FILE,
   getGitBlobSha,
   loadPatchProofConfigFromGit,
+  normalizeRelativePath,
   readGitFile,
   tryGetGitBlobSha
 } from "@patchproof/config";
@@ -84,6 +85,7 @@ export async function verifyPatchProof(options: VerifyOptions): Promise<VerifyRe
       headSha,
       config.commands.reproduce.harness_files
     );
+    await validateHarnessClosure(repoPath, baseSha, harnessFiles);
     const harnessChanged = harnessFiles.some((file) => file.changed);
 
     const baseNonce = randomUUID();
@@ -96,12 +98,10 @@ export async function verifyPatchProof(options: VerifyOptions): Promise<VerifyRe
       command: config.commands.reproduce.run,
       outputLimitBytes: config.output.limit_bytes,
       timeoutMs: config.commands.reproduce.timeout_ms,
-      envOverrides: {
-        PATCHPROOF_NONCE: baseNonce
-      }
+      challengeNonce: baseNonce
     });
     const baseStructured = parseStructuredReproductionResult(
-      baseReproductionStage.result,
+      baseReproductionStage.structuredResultText,
       baseNonce
     );
 
@@ -115,15 +115,13 @@ export async function verifyPatchProof(options: VerifyOptions): Promise<VerifyRe
       command: config.commands.reproduce.run,
       outputLimitBytes: config.output.limit_bytes,
       timeoutMs: config.commands.reproduce.timeout_ms,
-      envOverrides: {
-        PATCHPROOF_NONCE: headNonce
-      },
+      challengeNonce: headNonce,
       beforeRun: async (worktreePath) => {
         await writeBaseHarnessFiles(repoPath, baseSha, worktreePath, harnessFiles);
       }
     });
     const headStructured = parseStructuredReproductionResult(
-      headReproductionStage.result,
+      headReproductionStage.structuredResultText,
       headNonce
     );
 
@@ -291,13 +289,14 @@ interface StageRunOptions {
   command: string;
   timeoutMs: number;
   outputLimitBytes: number;
-  envOverrides?: NodeJS.ProcessEnv;
+  challengeNonce?: string;
   beforeRun?(worktreePath: string): Promise<void>;
 }
 
 interface StageRunResult {
   result: Awaited<ReturnType<typeof runCommand>>;
   redactedValues: string[];
+  structuredResultText: string;
 }
 
 async function runStage(options: StageRunOptions): Promise<StageRunResult> {
@@ -314,26 +313,35 @@ async function runStage(options: StageRunOptions): Promise<StageRunResult> {
     );
     worktreePath = worktree.path;
     await options.beforeRun?.(worktree.path);
-    const stageEnvironment = await createStageEnvironment(
+    const protocolFiles =
+      options.challengeNonce === undefined
+        ? undefined
+        : await createProtocolFiles(stageRoot, options.challengeNonce);
+    const stageEnvironment = await createStageEnvironment(stageRoot, options.label, [
+      options.proofDir,
+      options.repoPath,
       stageRoot,
-      options.label,
-      [options.proofDir, options.repoPath, stageRoot, worktree.path],
-      {
-        PATCHPROOF_STAGE: options.label,
-        ...options.envOverrides
-      }
-    );
+      worktree.path,
+      ...(protocolFiles ? [protocolFiles.challengePath, protocolFiles.resultPath] : [])
+    ]);
     const result = await runCommand({
       command: options.command,
       cwd: worktree.path,
       env: stageEnvironment.env,
+      extraFiles: protocolFiles
+        ? [
+            { fd: 3, flags: "r", path: protocolFiles.challengePath },
+            { fd: 4, flags: "w", path: protocolFiles.resultPath }
+          ]
+        : undefined,
       outputLimitBytes: options.outputLimitBytes,
       timeoutMs: options.timeoutMs
     });
 
     return {
       result,
-      redactedValues: stageEnvironment.redactedValues
+      redactedValues: stageEnvironment.redactedValues,
+      structuredResultText: protocolFiles ? await readProtocolResult(protocolFiles.resultPath) : ""
     };
   } finally {
     if (worktreePath) {
@@ -346,8 +354,7 @@ async function runStage(options: StageRunOptions): Promise<StageRunResult> {
 async function createStageEnvironment(
   stageRoot: string,
   stageName: string,
-  additionalRedactedValues: readonly string[],
-  overrides: NodeJS.ProcessEnv = {}
+  additionalRedactedValues: readonly string[]
 ): Promise<{ env: NodeJS.ProcessEnv; redactedValues: string[] }> {
   const stageTmp = join(stageRoot, `${stageName}-${randomUUID()}`);
   await mkdir(stageTmp, { recursive: true });
@@ -356,20 +363,39 @@ async function createStageEnvironment(
       HOME: stageTmp,
       TEMP: stageTmp,
       TMP: stageTmp,
-      TMPDIR: stageTmp,
-      ...overrides
+      TMPDIR: stageTmp
     }
   });
   return {
     env,
     redactedValues: [
       ...collectRedactedValues(env),
-      ...Object.values(overrides).filter((value): value is string => value !== undefined),
       stageRoot,
       stageTmp,
       ...additionalRedactedValues
     ]
   };
+}
+
+async function createProtocolFiles(
+  stageRoot: string,
+  nonce: string
+): Promise<{ challengePath: string; resultPath: string }> {
+  const protocolRoot = join(stageRoot, "protocol");
+  await mkdir(protocolRoot, { recursive: true });
+  const challengePath = join(protocolRoot, "challenge.json");
+  const resultPath = join(protocolRoot, "result.jsonl");
+  await writeFile(challengePath, `${JSON.stringify({ nonce })}\n`, "utf8");
+  await writeFile(resultPath, "", "utf8");
+  return { challengePath, resultPath };
+}
+
+async function readProtocolResult(resultPath: string): Promise<string> {
+  try {
+    return await readFile(resultPath, "utf8");
+  } catch {
+    return "";
+  }
 }
 
 function collectRedactedValues(env: NodeJS.ProcessEnv): string[] {
@@ -403,6 +429,148 @@ async function collectHarnessEvidence(
       };
     })
   );
+}
+
+async function validateHarnessClosure(
+  repoPath: string,
+  baseSha: string,
+  files: readonly HarnessFileEvidence[]
+): Promise<void> {
+  const harnessPaths = new Set(files.map((file) => file.path));
+  const missing: string[] = [];
+
+  for (const file of files) {
+    const content = (await readGitFile(repoPath, baseSha, file.path)).toString("utf8");
+    const dependencies = await collectHarnessDependencies(repoPath, baseSha, file.path, content);
+    for (const dependency of dependencies) {
+      if (!harnessPaths.has(dependency)) {
+        missing.push(`${file.path} -> ${dependency}`);
+      }
+    }
+  }
+
+  if (missing.length > 0) {
+    throw new VerificationRuntimeError(
+      `Trusted harness manifest is incomplete; add these dependencies to commands.reproduce.harness_files: ${missing.join(", ")}`
+    );
+  }
+}
+
+async function collectHarnessDependencies(
+  repoPath: string,
+  baseSha: string,
+  filePath: string,
+  content: string
+): Promise<string[]> {
+  if (/\.[cm]?[jt]sx?$/.test(filePath)) {
+    return await collectJavaScriptHarnessDependencies(repoPath, baseSha, filePath, content);
+  }
+  if (filePath.endsWith(".py")) {
+    return await collectPythonHarnessDependencies(repoPath, baseSha, filePath, content);
+  }
+  return [];
+}
+
+async function collectJavaScriptHarnessDependencies(
+  repoPath: string,
+  baseSha: string,
+  filePath: string,
+  content: string
+): Promise<string[]> {
+  const dependencies = new Set<string>();
+  const importPattern =
+    /\b(?:import\s+(?:[^'"]+\s+from\s+)?|export\s+[^'"]+\s+from\s+|import\s*\(|require\s*\()\s*["'](\.{1,2}\/[^"']+)["']/g;
+  for (const match of content.matchAll(importPattern)) {
+    const specifier = match[1];
+    if (!specifier) {
+      continue;
+    }
+    const resolved = await resolveJavaScriptSpecifier(repoPath, baseSha, filePath, specifier);
+    if (resolved) {
+      dependencies.add(resolved);
+    }
+  }
+  return [...dependencies].sort();
+}
+
+async function resolveJavaScriptSpecifier(
+  repoPath: string,
+  baseSha: string,
+  importerPath: string,
+  specifier: string
+): Promise<string | null> {
+  const basePath = normalizeRelativePath(join(dirname(importerPath), specifier));
+  const candidates =
+    extname(basePath) === ""
+      ? [
+          basePath,
+          `${basePath}.js`,
+          `${basePath}.mjs`,
+          `${basePath}.cjs`,
+          `${basePath}.ts`,
+          `${basePath}.tsx`,
+          `${basePath}.jsx`,
+          `${basePath}.json`,
+          `${basePath}/index.js`,
+          `${basePath}/index.mjs`,
+          `${basePath}/index.cjs`,
+          `${basePath}/index.ts`
+        ]
+      : [basePath];
+
+  return await firstExistingGitPath(repoPath, baseSha, candidates);
+}
+
+async function collectPythonHarnessDependencies(
+  repoPath: string,
+  baseSha: string,
+  filePath: string,
+  content: string
+): Promise<string[]> {
+  const dependencies = new Set<string>();
+  const importPattern = /^\s*(?:from\s+([A-Za-z_][\w.]*)\s+import|import\s+([A-Za-z_][\w.]*))/gm;
+  for (const match of content.matchAll(importPattern)) {
+    const moduleName = match[1] ?? match[2];
+    if (!moduleName) {
+      continue;
+    }
+    const resolved = await resolvePythonModule(repoPath, baseSha, filePath, moduleName);
+    if (resolved) {
+      dependencies.add(resolved);
+    }
+  }
+  return [...dependencies].sort();
+}
+
+async function resolvePythonModule(
+  repoPath: string,
+  baseSha: string,
+  importerPath: string,
+  moduleName: string
+): Promise<string | null> {
+  const modulePath = moduleName.replaceAll(".", "/");
+  const importerDir = dirname(importerPath);
+  const candidates = [
+    `${modulePath}.py`,
+    `${modulePath}/__init__.py`,
+    normalizeRelativePath(join(importerDir, `${modulePath}.py`)),
+    normalizeRelativePath(join(importerDir, modulePath, "__init__.py"))
+  ];
+
+  return await firstExistingGitPath(repoPath, baseSha, candidates);
+}
+
+async function firstExistingGitPath(
+  repoPath: string,
+  baseSha: string,
+  candidates: readonly string[]
+): Promise<string | null> {
+  for (const candidate of candidates) {
+    if ((await tryGetGitBlobSha(repoPath, baseSha, candidate)) !== null) {
+      return candidate;
+    }
+  }
+  return null;
 }
 
 async function writeBaseHarnessFiles(

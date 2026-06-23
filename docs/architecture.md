@@ -20,7 +20,8 @@ The v0.1 verifier reads `patchproof.yml` from the trusted base commit, not from 
 head. The proof records the trusted config path, source commit, blob SHA, and whether the head
 commit changed the policy file.
 
-The base config must list `commands.reproduce.harness_files`. PatchProof records each trusted
+The base config must list `commands.reproduce.harness_files`. The list is the trusted harness
+closure: helper files imported by the harness must also be listed. PatchProof records each trusted
 harness file's base and head Git blob SHA. Head changes to those files set `harness_changed` and
 block a verified verdict. For head reproduction, PatchProof overwrites the listed harness files with
 the base commit versions before executing the command.
@@ -34,12 +35,15 @@ It then runs each stage in sequence:
 Later worktrees are not created until earlier command processes have exited and their temporary
 worktree roots have been removed.
 
-Reproduction commands must emit exactly one line of JSON with the nonce PatchProof supplies in
-`PATCHPROOF_NONCE`:
+Reproduction commands read a verifier challenge from file descriptor 3 and write exactly one line of
+JSON to file descriptor 4:
 
 ```json
 { "nonce": "...", "status": "assertion_failed" }
 ```
+
+`stdout` and `stderr` are logs only; structured JSON printed there is not authoritative. PatchProof
+does not set `PATCHPROOF_NONCE` or `PATCHPROOF_STAGE` in the command environment.
 
 Allowed statuses are `assertion_failed`, `assertion_passed`, and `setup_error`. Base reproduction
 requires `assertion_failed`; head reproduction requires `assertion_passed`. Missing JSON, invalid
@@ -70,6 +74,10 @@ Configured commands execute repository code and are treated as untrusted in pull
 The GitHub Action is designed for `pull_request` workflows with `contents: read`; workflows must not
 pass secrets into the verification job. `runtime.env_passthrough` is disabled for untrusted
 verification. Each command runs with a temporary `HOME` and a restricted environment.
+
+Trusted harnesses should call hostile target code through a subprocess or RPC boundary with a
+sanitized environment. Running target code in the same language process as the harness can still
+allow semantic bypasses, so it is not a stable hostile-code boundary.
 
 PatchProof sends timeout signals to the command process group and follows with `SIGKILL` after a
 short grace period. This is process isolation, not a sandbox. Do not run untrusted pull request

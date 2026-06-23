@@ -28,8 +28,13 @@ timeouts, and writes:
 - `.patchproof/proof.json`
 - `.patchproof/proof.md`
 
-Minimal reproduction commands must use a trusted harness file listed in base config and emit a
-nonce-bound structured result:
+PatchProof is currently a cooperative alpha. It does not yet provide a security boundary against
+malicious pull-request code. Run it only on ephemeral GitHub-hosted runners with read-only
+permissions and no secrets.
+
+Minimal reproduction commands must use a trusted harness file listed in base config. The harness
+reads a verifier challenge from file descriptor 3 and writes exactly one nonce-bound structured
+result line to file descriptor 4. `stdout` and `stderr` are captured only as logs:
 
 ```yaml
 version: 1
@@ -46,8 +51,11 @@ commands:
 ```
 
 ```js
+const { readFileSync, writeFileSync } = require("node:fs");
+const challenge = JSON.parse(readFileSync(3, "utf8"));
 const status = bugStillPresent() ? "assertion_failed" : "assertion_passed";
-console.log(JSON.stringify({ nonce: process.env.PATCHPROOF_NONCE, status }));
+
+writeFileSync(4, `${JSON.stringify({ nonce: challenge.nonce, status })}\n`);
 process.exit(status === "assertion_passed" ? 0 : 1);
 ```
 

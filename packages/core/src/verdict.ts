@@ -129,10 +129,11 @@ export function proofExitCode(proof: Proof): 0 | 1 {
 }
 
 export function parseStructuredReproductionResult(
-  result: CommandResult,
+  result: CommandResult | string,
   expectedNonce: string
 ): { infrastructureErrorReason: string | null; structuredResult: StructuredResult | null } {
-  const candidates = `${result.stdout}\n${result.stderr}`
+  const text = typeof result === "string" ? result : `${result.stdout}\n${result.stderr}`;
+  const candidates = text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.startsWith("{") && line.endsWith("}"))

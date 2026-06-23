@@ -2,14 +2,13 @@ version: 1
 commands:
   reproduce:
     run:
-      'node -e "const status = process.env.PATCHPROOF_STAGE === ''base-reproduce'' ?
-      ''assertion_failed'' : ''assertion_passed''; console.log(JSON.stringify({ nonce:
-      process.env.PATCHPROOF_NONCE, status })); process.exit(status === ''assertion_failed'' ? 1 :
-      0);"'
+      'node -e "const fs = require(''node:fs''); const challenge = JSON.parse(fs.readFileSync(3,
+      ''utf8'')); fs.writeFileSync(4, JSON.stringify({ nonce: challenge.nonce, status:
+      ''assertion_passed'' }) + ''\n''); process.exit(0);"'
     harness_files:
       - patchproof.yml
     expected_exit_code:
-      base: 1
+      base: 0
       head: 0
   test:
     run: node -e "process.exit(0)"

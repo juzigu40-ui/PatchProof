@@ -7367,7 +7367,7 @@ __export(index_exports, {
   runAction: () => runAction
 });
 module.exports = __toCommonJS(index_exports);
-var import_node_fs = require("fs");
+var import_node_fs2 = require("fs");
 
 // ../adapters-node/src/index.ts
 var import_promises = require("fs/promises");
@@ -13699,8 +13699,9 @@ function proofExitCode(proof) {
   return proof.verdict.exit_code;
 }
 function parseStructuredReproductionResult(result, expectedNonce) {
-  const candidates = `${result.stdout}
-${result.stderr}`.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith("{") && line.endsWith("}")).map(parseStructuredResultLine).filter((candidate) => candidate !== null);
+  const text = typeof result === "string" ? result : `${result.stdout}
+${result.stderr}`;
+  const candidates = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.startsWith("{") && line.endsWith("}")).map(parseStructuredResultLine).filter((candidate) => candidate !== null);
   if (candidates.length === 0) {
     return {
       infrastructureErrorReason: "structured_result_missing",
@@ -13799,6 +13800,7 @@ var import_node_path5 = require("path");
 // ../runner/src/index.ts
 var import_node_child_process2 = require("child_process");
 var import_node_crypto = require("crypto");
+var import_node_fs = require("fs");
 var import_promises4 = require("fs/promises");
 var import_node_path4 = require("path");
 var import_node_util2 = require("util");
@@ -13841,14 +13843,29 @@ async function runCommand(options) {
   const started = process.hrtime.bigint();
   const stdout = createLimitedCapture(options.outputLimitBytes);
   const stderr = createLimitedCapture(options.outputLimitBytes);
+  const openedFiles = [];
   return await new Promise((resolve3) => {
+    const stdio = ["ignore", "pipe", "pipe"];
+    for (const file of options.extraFiles ?? []) {
+      if (file.fd < 3) {
+        throw new Error("extra file descriptors must be 3 or greater");
+      }
+      const opened = (0, import_node_fs.openSync)(file.path, file.flags);
+      openedFiles.push(opened);
+      while (stdio.length <= file.fd) {
+        stdio.push("ignore");
+      }
+      stdio[file.fd] = opened;
+    }
     const child = (0, import_node_child_process2.spawn)(options.command, {
       cwd: options.cwd,
       env: options.env ?? createCommandEnvironment(),
       detached: process.platform !== "win32",
       shell: true,
+      stdio,
       windowsHide: true
     });
+    closeOpenedFiles(openedFiles);
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -13858,12 +13875,13 @@ async function runCommand(options) {
       }, 500).unref();
     }, options.timeoutMs);
     timeout.unref();
-    child.stdout.on("data", (chunk) => stdout.append(chunk));
-    child.stderr.on("data", (chunk) => stderr.append(chunk));
+    child.stdout?.on("data", (chunk) => stdout.append(chunk));
+    child.stderr?.on("data", (chunk) => stderr.append(chunk));
     child.on("error", (error) => {
       stderr.append(Buffer.from(error.message));
     });
     child.on("close", (exitCode, signal) => {
+      closeOpenedFiles(openedFiles);
       clearTimeout(timeout);
       const finished = process.hrtime.bigint();
       resolve3({
@@ -13880,6 +13898,18 @@ async function runCommand(options) {
       });
     });
   });
+}
+function closeOpenedFiles(openedFiles) {
+  while (openedFiles.length > 0) {
+    const fd = openedFiles.pop();
+    if (fd === void 0) {
+      continue;
+    }
+    try {
+      (0, import_node_fs.closeSync)(fd);
+    } catch {
+    }
+  }
 }
 function killProcessTree(pid, signal) {
   if (pid === void 0) {
@@ -13988,6 +14018,7 @@ async function verifyPatchProof(options) {
       headSha,
       config.commands.reproduce.harness_files
     );
+    await validateHarnessClosure(repoPath, baseSha, harnessFiles);
     const harnessChanged = harnessFiles.some((file) => file.changed);
     const baseNonce = (0, import_node_crypto2.randomUUID)();
     const baseReproductionStage = await runStage({
@@ -13999,12 +14030,10 @@ async function verifyPatchProof(options) {
       command: config.commands.reproduce.run,
       outputLimitBytes: config.output.limit_bytes,
       timeoutMs: config.commands.reproduce.timeout_ms,
-      envOverrides: {
-        PATCHPROOF_NONCE: baseNonce
-      }
+      challengeNonce: baseNonce
     });
     const baseStructured = parseStructuredReproductionResult(
-      baseReproductionStage.result,
+      baseReproductionStage.structuredResultText,
       baseNonce
     );
     const headNonce = (0, import_node_crypto2.randomUUID)();
@@ -14017,15 +14046,13 @@ async function verifyPatchProof(options) {
       command: config.commands.reproduce.run,
       outputLimitBytes: config.output.limit_bytes,
       timeoutMs: config.commands.reproduce.timeout_ms,
-      envOverrides: {
-        PATCHPROOF_NONCE: headNonce
-      },
+      challengeNonce: headNonce,
       beforeRun: async (worktreePath) => {
         await writeBaseHarnessFiles(repoPath, baseSha, worktreePath, harnessFiles);
       }
     });
     const headStructured = parseStructuredReproductionResult(
-      headReproductionStage.result,
+      headReproductionStage.structuredResultText,
       headNonce
     );
     let riskPatterns;
@@ -14175,25 +14202,29 @@ async function runStage(options) {
     );
     worktreePath = worktree.path;
     await options.beforeRun?.(worktree.path);
-    const stageEnvironment = await createStageEnvironment(
+    const protocolFiles = options.challengeNonce === void 0 ? void 0 : await createProtocolFiles(stageRoot, options.challengeNonce);
+    const stageEnvironment = await createStageEnvironment(stageRoot, options.label, [
+      options.proofDir,
+      options.repoPath,
       stageRoot,
-      options.label,
-      [options.proofDir, options.repoPath, stageRoot, worktree.path],
-      {
-        PATCHPROOF_STAGE: options.label,
-        ...options.envOverrides
-      }
-    );
+      worktree.path,
+      ...protocolFiles ? [protocolFiles.challengePath, protocolFiles.resultPath] : []
+    ]);
     const result = await runCommand({
       command: options.command,
       cwd: worktree.path,
       env: stageEnvironment.env,
+      extraFiles: protocolFiles ? [
+        { fd: 3, flags: "r", path: protocolFiles.challengePath },
+        { fd: 4, flags: "w", path: protocolFiles.resultPath }
+      ] : void 0,
       outputLimitBytes: options.outputLimitBytes,
       timeoutMs: options.timeoutMs
     });
     return {
       result,
-      redactedValues: stageEnvironment.redactedValues
+      redactedValues: stageEnvironment.redactedValues,
+      structuredResultText: protocolFiles ? await readProtocolResult(protocolFiles.resultPath) : ""
     };
   } finally {
     if (worktreePath) {
@@ -14202,7 +14233,7 @@ async function runStage(options) {
     await (0, import_promises5.rm)(stageRoot, { force: true, recursive: true });
   }
 }
-async function createStageEnvironment(stageRoot, stageName, additionalRedactedValues, overrides = {}) {
+async function createStageEnvironment(stageRoot, stageName, additionalRedactedValues) {
   const stageTmp = (0, import_node_path5.join)(stageRoot, `${stageName}-${(0, import_node_crypto2.randomUUID)()}`);
   await (0, import_promises5.mkdir)(stageTmp, { recursive: true });
   const env = createCommandEnvironment(process.env, {
@@ -14210,20 +14241,35 @@ async function createStageEnvironment(stageRoot, stageName, additionalRedactedVa
       HOME: stageTmp,
       TEMP: stageTmp,
       TMP: stageTmp,
-      TMPDIR: stageTmp,
-      ...overrides
+      TMPDIR: stageTmp
     }
   });
   return {
     env,
     redactedValues: [
       ...collectRedactedValues(env),
-      ...Object.values(overrides).filter((value) => value !== void 0),
       stageRoot,
       stageTmp,
       ...additionalRedactedValues
     ]
   };
+}
+async function createProtocolFiles(stageRoot, nonce) {
+  const protocolRoot = (0, import_node_path5.join)(stageRoot, "protocol");
+  await (0, import_promises5.mkdir)(protocolRoot, { recursive: true });
+  const challengePath = (0, import_node_path5.join)(protocolRoot, "challenge.json");
+  const resultPath = (0, import_node_path5.join)(protocolRoot, "result.jsonl");
+  await (0, import_promises5.writeFile)(challengePath, `${JSON.stringify({ nonce })}
+`, "utf8");
+  await (0, import_promises5.writeFile)(resultPath, "", "utf8");
+  return { challengePath, resultPath };
+}
+async function readProtocolResult(resultPath) {
+  try {
+    return await (0, import_promises5.readFile)(resultPath, "utf8");
+  } catch {
+    return "";
+  }
 }
 function collectRedactedValues(env) {
   return Object.entries(env).filter((entry) => {
@@ -14244,6 +14290,100 @@ async function collectHarnessEvidence(repoPath, baseSha, headSha, files) {
       };
     })
   );
+}
+async function validateHarnessClosure(repoPath, baseSha, files) {
+  const harnessPaths = new Set(files.map((file) => file.path));
+  const missing = [];
+  for (const file of files) {
+    const content = (await readGitFile(repoPath, baseSha, file.path)).toString("utf8");
+    const dependencies = await collectHarnessDependencies(repoPath, baseSha, file.path, content);
+    for (const dependency of dependencies) {
+      if (!harnessPaths.has(dependency)) {
+        missing.push(`${file.path} -> ${dependency}`);
+      }
+    }
+  }
+  if (missing.length > 0) {
+    throw new VerificationRuntimeError(
+      `Trusted harness manifest is incomplete; add these dependencies to commands.reproduce.harness_files: ${missing.join(", ")}`
+    );
+  }
+}
+async function collectHarnessDependencies(repoPath, baseSha, filePath, content) {
+  if (/\.[cm]?[jt]sx?$/.test(filePath)) {
+    return await collectJavaScriptHarnessDependencies(repoPath, baseSha, filePath, content);
+  }
+  if (filePath.endsWith(".py")) {
+    return await collectPythonHarnessDependencies(repoPath, baseSha, filePath, content);
+  }
+  return [];
+}
+async function collectJavaScriptHarnessDependencies(repoPath, baseSha, filePath, content) {
+  const dependencies = /* @__PURE__ */ new Set();
+  const importPattern = /\b(?:import\s+(?:[^'"]+\s+from\s+)?|export\s+[^'"]+\s+from\s+|import\s*\(|require\s*\()\s*["'](\.{1,2}\/[^"']+)["']/g;
+  for (const match2 of content.matchAll(importPattern)) {
+    const specifier = match2[1];
+    if (!specifier) {
+      continue;
+    }
+    const resolved = await resolveJavaScriptSpecifier(repoPath, baseSha, filePath, specifier);
+    if (resolved) {
+      dependencies.add(resolved);
+    }
+  }
+  return [...dependencies].sort();
+}
+async function resolveJavaScriptSpecifier(repoPath, baseSha, importerPath, specifier) {
+  const basePath = normalizeRelativePath((0, import_node_path5.join)((0, import_node_path5.dirname)(importerPath), specifier));
+  const candidates = (0, import_node_path5.extname)(basePath) === "" ? [
+    basePath,
+    `${basePath}.js`,
+    `${basePath}.mjs`,
+    `${basePath}.cjs`,
+    `${basePath}.ts`,
+    `${basePath}.tsx`,
+    `${basePath}.jsx`,
+    `${basePath}.json`,
+    `${basePath}/index.js`,
+    `${basePath}/index.mjs`,
+    `${basePath}/index.cjs`,
+    `${basePath}/index.ts`
+  ] : [basePath];
+  return await firstExistingGitPath(repoPath, baseSha, candidates);
+}
+async function collectPythonHarnessDependencies(repoPath, baseSha, filePath, content) {
+  const dependencies = /* @__PURE__ */ new Set();
+  const importPattern = /^\s*(?:from\s+([A-Za-z_][\w.]*)\s+import|import\s+([A-Za-z_][\w.]*))/gm;
+  for (const match2 of content.matchAll(importPattern)) {
+    const moduleName = match2[1] ?? match2[2];
+    if (!moduleName) {
+      continue;
+    }
+    const resolved = await resolvePythonModule(repoPath, baseSha, filePath, moduleName);
+    if (resolved) {
+      dependencies.add(resolved);
+    }
+  }
+  return [...dependencies].sort();
+}
+async function resolvePythonModule(repoPath, baseSha, importerPath, moduleName) {
+  const modulePath = moduleName.replaceAll(".", "/");
+  const importerDir = (0, import_node_path5.dirname)(importerPath);
+  const candidates = [
+    `${modulePath}.py`,
+    `${modulePath}/__init__.py`,
+    normalizeRelativePath((0, import_node_path5.join)(importerDir, `${modulePath}.py`)),
+    normalizeRelativePath((0, import_node_path5.join)(importerDir, modulePath, "__init__.py"))
+  ];
+  return await firstExistingGitPath(repoPath, baseSha, candidates);
+}
+async function firstExistingGitPath(repoPath, baseSha, candidates) {
+  for (const candidate of candidates) {
+    if (await tryGetGitBlobSha(repoPath, baseSha, candidate) !== null) {
+      return candidate;
+    }
+  }
+  return null;
 }
 async function writeBaseHarnessFiles(repoPath, baseSha, worktreePath, files) {
   await Promise.all(
@@ -14271,7 +14411,7 @@ async function runAction() {
   });
   const summaryPath = process.env.GITHUB_STEP_SUMMARY;
   if (summaryPath) {
-    (0, import_node_fs.appendFileSync)(
+    (0, import_node_fs2.appendFileSync)(
       summaryPath,
       [
         "## PatchProof",

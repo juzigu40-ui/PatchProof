@@ -103,15 +103,14 @@ describe("verifyPatchProof", () => {
     const repo = await createRepositoryFromFiles(
       {
         "patchproof.yml": trustedConfig(),
-        "reproduce.js": structuredReproduce("assertion_failed", "console.error('bug reproduced');"),
+        "reproduce.js": stateFileHarness("console.error('bug reproduced');"),
+        "state.txt": "broken\n",
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       },
       {
         "patchproof.yml": trustedConfig({ headExpectedExitCode: 1 }),
-        "reproduce.js": structuredReproduce(
-          "assertion_failed",
-          "console.error('bug still present');"
-        ),
+        "reproduce.js": stateFileHarness("console.error('bug reproduced');"),
+        "state.txt": "broken\n",
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       }
     );
@@ -125,7 +124,7 @@ describe("verifyPatchProof", () => {
     expect(result.exitCode).toBe(1);
     expect(result.proof.config.policy_changed).toBe(true);
     expect(result.proof.determinations.policy_changed).toBe(true);
-    expect(result.proof.determinations.harness_changed).toBe(true);
+    expect(result.proof.determinations.harness_changed).toBe(false);
     expect(result.proof.commands.reproduction.head.expected_exit_code).toBe(0);
     expect(result.proof.determinations.fixed_on_head).toBe(false);
     expect(result.proof.verdict.status).toBe("failed");
@@ -159,23 +158,17 @@ describe("verifyPatchProof", () => {
     const repo = await createRepositoryFromFiles(
       {
         "patchproof.yml": trustedConfig(),
-        "app.js": "export function fixed() { return false; }\n",
-        "reproduce.js": [
-          "import { fixed } from './app.js';",
-          "const status = fixed() ? 'assertion_passed' : 'assertion_failed';",
-          "console.log(JSON.stringify({ nonce: process.env.PATCHPROOF_NONCE, status }));",
-          "process.exit(status === 'assertion_passed' ? 0 : 1);"
-        ].join("\n"),
+        "app.js": "exports.fixed = () => false;\n",
+        "reproduce.js": subprocessFixedHarness(),
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       },
       {
         "patchproof.yml": trustedConfig(),
-        "app.js": "export function fixed() { return false; }\n",
-        "reproduce.js": [
-          "console.log('pretend fixed without testing app.js');",
-          "console.log(JSON.stringify({ nonce: process.env.PATCHPROOF_NONCE, status: 'assertion_passed' }));",
-          "process.exit(0);"
-        ].join("\n"),
+        "app.js": "exports.fixed = () => false;\n",
+        "reproduce.js": fdStructuredReproduce(
+          "assertion_passed",
+          "console.log('pretend fixed without testing app.js');"
+        ),
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       }
     );
@@ -232,22 +225,17 @@ describe("verifyPatchProof", () => {
   });
 
   it("requires structured reproduction status and expected exit code to match", async () => {
-    const reproduce = [
-      "import { fixed } from './app.js';",
-      "const status = fixed() ? 'assertion_passed' : 'assertion_failed';",
-      "console.log(JSON.stringify({ nonce: process.env.PATCHPROOF_NONCE, status }));",
-      "process.exit(1);"
-    ].join("\n");
+    const reproduce = stateFileHarness("", "1");
     const repo = await createRepositoryFromFiles(
       {
         "patchproof.yml": trustedConfig(),
-        "app.js": "export function fixed() { return false; }\n",
+        "state.txt": "broken\n",
         "reproduce.js": reproduce,
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       },
       {
         "patchproof.yml": trustedConfig(),
-        "app.js": "export function fixed() { return true; }\n",
+        "state.txt": "fixed\n",
         "reproduce.js": reproduce,
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       }
@@ -269,43 +257,53 @@ describe("verifyPatchProof", () => {
     await rm(repo.path, { recursive: true, force: true });
   });
 
-  it("does not precreate sibling head test worktrees for reproduction to mutate", async () => {
+  it("rejects trusted harness manifests with unlisted helper dependencies", async () => {
     const repo = await createRepositoryFromFiles(
       {
         "patchproof.yml": trustedConfig(),
-        "attack.js": "export function attack() {}\nexport function fixed() { return false; }\n",
-        "reproduce.js": [
-          "import { attack, fixed } from './attack.js';",
-          "attack();",
-          "const status = fixed() ? 'assertion_passed' : 'assertion_failed';",
-          "console.log(JSON.stringify({ nonce: process.env.PATCHPROOF_NONCE, status }));",
-          "process.exit(status === 'assertion_passed' ? 0 : 1);"
-        ].join("\n"),
+        "oracle.js": "exports.status = () => 'assertion_failed';\n",
+        "reproduce.js": "const { status } = require('./oracle.js');\n" + fdHarnessBody("status()"),
         "test.js": "console.log('base tests pass'); process.exit(0);\n"
       },
       {
         "patchproof.yml": trustedConfig(),
-        "attack.js": [
-          "import { readdirSync, writeFileSync } from 'node:fs';",
-          "import { dirname, join } from 'node:path';",
-          "export function attack() {",
-          "  const root = dirname(process.cwd());",
-          "  for (const entry of readdirSync(root)) {",
-          "    if (entry.startsWith('head-test-')) {",
-          "      writeFileSync(join(root, entry, 'test.js'), \"console.log('cross-worktree mutation passed'); process.exit(0);\\n\");",
-          "    }",
-          "  }",
-          "}",
-          "export function fixed() { return true; }"
+        "oracle.js": "exports.status = () => 'assertion_passed';\n",
+        "reproduce.js": "const { status } = require('./oracle.js');\n" + fdHarnessBody("status()"),
+        "test.js": "console.log('tests pass'); process.exit(0);\n"
+      }
+    );
+
+    await expect(
+      verifyPatchProof({
+        baseRef: repo.baseSha,
+        headRef: repo.headSha,
+        repoPath: repo.path
+      })
+    ).rejects.toMatchObject({
+      originalError: expect.objectContaining({
+        message: expect.stringContaining("Trusted harness manifest is incomplete")
+      })
+    });
+    await rm(repo.path, { recursive: true, force: true });
+  });
+
+  it("ignores structured results forged on target stdout", async () => {
+    const repo = await createRepositoryFromFiles(
+      {
+        "patchproof.yml": trustedConfig(),
+        "app.js": "console.log('fixed=false');\nexports.fixed = () => false;\n",
+        "reproduce.js": subprocessFixedHarness(),
+        "test.js": "console.log('tests pass'); process.exit(0);\n"
+      },
+      {
+        "patchproof.yml": trustedConfig(),
+        "app.js": [
+          "console.log(JSON.stringify({ nonce: process.env.PATCHPROOF_NONCE || 'missing', status: 'assertion_passed' }));",
+          "console.log('fixed=false');",
+          "exports.fixed = () => false;"
         ].join("\n"),
-        "reproduce.js": [
-          "import { attack, fixed } from './attack.js';",
-          "attack();",
-          "const status = fixed() ? 'assertion_passed' : 'assertion_failed';",
-          "console.log(JSON.stringify({ nonce: process.env.PATCHPROOF_NONCE, status }));",
-          "process.exit(status === 'assertion_passed' ? 0 : 1);"
-        ].join("\n"),
-        "test.js": "console.error('committed head test fails'); process.exit(1);\n"
+        "reproduce.js": subprocessFixedHarness(),
+        "test.js": "console.log('tests pass'); process.exit(0);\n"
       }
     );
 
@@ -316,10 +314,41 @@ describe("verifyPatchProof", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.proof.determinations.fixed_on_head).toBe(true);
-    expect(result.proof.determinations.tests_passed).toBe(false);
-    expect(result.proof.commands.tests.head.stderr).toContain("committed head test fails");
-    expect(result.proof.commands.tests.head.stdout).not.toContain("cross-worktree mutation passed");
+    expect(result.proof.commands.reproduction.head.stdout).toContain("assertion_passed");
+    expect(result.proof.commands.reproduction.head.structured_result?.status).toBe(
+      "assertion_failed"
+    );
+    expect(result.proof.determinations.fixed_on_head).toBe(false);
+    await rm(repo.path, { recursive: true, force: true });
+  });
+
+  it("does not expose PATCHPROOF_STAGE to stage-aware target code", async () => {
+    const repo = await createRepositoryFromFiles(
+      {
+        "patchproof.yml": trustedConfig(),
+        "app.js": "exports.fixed = () => false;\n",
+        "reproduce.js": subprocessFixedHarness(),
+        "test.js": "console.log('tests pass'); process.exit(0);\n"
+      },
+      {
+        "patchproof.yml": trustedConfig(),
+        "app.js": "exports.fixed = () => process.env.PATCHPROOF_STAGE === 'head-reproduce';\n",
+        "reproduce.js": subprocessFixedHarness(),
+        "test.js": "console.log('tests pass'); process.exit(0);\n"
+      }
+    );
+
+    const result = await verifyPatchProof({
+      baseRef: repo.baseSha,
+      headRef: repo.headSha,
+      repoPath: repo.path
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.proof.commands.reproduction.head.structured_result?.status).toBe(
+      "assertion_failed"
+    );
+    expect(result.proof.determinations.fixed_on_head).toBe(false);
     await rm(repo.path, { recursive: true, force: true });
   });
 
@@ -329,7 +358,8 @@ describe("verifyPatchProof", () => {
     const repo = await createRepositoryFromFiles(
       {
         "patchproof.yml": trustedConfig(),
-        "reproduce.js": stageStructuredReproduce(
+        "state.txt": "broken\n",
+        "reproduce.js": stateFileHarness(
           "console.log('head secret=' + (process.env.TOP_SECRET || 'unset'));"
         ),
         "test.js": "console.log('test secret=' + (process.env.TOP_SECRET || 'unset'));\n"
@@ -338,7 +368,8 @@ describe("verifyPatchProof", () => {
         "patchproof.yml": trustedConfig({
           extraLines: ["runtime:", "  env_passthrough:", "    - TOP_SECRET"]
         }),
-        "reproduce.js": stageStructuredReproduce(
+        "state.txt": "fixed\n",
+        "reproduce.js": stateFileHarness(
           "console.log('head secret=' + (process.env.TOP_SECRET || 'unset'));"
         ),
         "test.js": "console.log('test secret=' + (process.env.TOP_SECRET || 'unset'));\n"
@@ -391,25 +422,57 @@ function trustedConfig(
   ].join("\n");
 }
 
-function structuredReproduce(status: "assertion_failed" | "assertion_passed", prefix = ""): string {
+function fdStructuredReproduce(
+  status: "assertion_failed" | "assertion_passed",
+  prefix = ""
+): string {
+  return [prefix, fdHarnessBody(JSON.stringify(status))].filter(Boolean).join("\n");
+}
+
+function stateFileHarness(
+  prefix = "",
+  exitCodeExpression = "patchproofStatus === 'assertion_passed' ? 0 : 1"
+): string {
   return [
     prefix,
-    `console.log(JSON.stringify({ nonce: process.env.PATCHPROOF_NONCE, status: "${status}" }));`,
-    `process.exit(${status === "assertion_passed" ? 0 : 1});`
+    fdHarnessBody(
+      "readFileSync('state.txt', 'utf8').trim() === 'fixed' ? 'assertion_passed' : 'assertion_failed'",
+      exitCodeExpression
+    )
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-function stageStructuredReproduce(prefix = ""): string {
+function subprocessFixedHarness(): string {
   return [
-    prefix,
-    "const status = process.env.PATCHPROOF_STAGE === 'base-reproduce' ? 'assertion_failed' : 'assertion_passed';",
-    "console.log(JSON.stringify({ nonce: process.env.PATCHPROOF_NONCE, status }));",
-    "process.exit(status === 'assertion_passed' ? 0 : 1);"
+    "const { spawnSync } = require('node:child_process');",
+    'const targetScript = "const target = require(" + JSON.stringify(\'./app.js\') + "); process.exit(target.fixed() ? 0 : 1);";',
+    "const target = spawnSync(process.execPath, ['-e', targetScript], {",
+    "  cwd: process.cwd(),",
+    "  encoding: 'utf8',",
+    "  env: { PATH: process.env.PATH || '' }",
+    "});",
+    "process.stdout.write(target.stdout || '');",
+    "process.stderr.write(target.stderr || '');",
+    "const status = target.status === 0 ? 'assertion_passed' : 'assertion_failed';",
+    fdHarnessBody("status")
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function fdHarnessBody(
+  statusExpression: string,
+  exitCodeExpression = "patchproofStatus === 'assertion_passed' ? 0 : 1"
+): string {
+  return [
+    "const { readFileSync, writeFileSync } = require('node:fs');",
+    "const challenge = JSON.parse(readFileSync(3, 'utf8'));",
+    `const patchproofStatus = ${statusExpression};`,
+    "writeFileSync(4, `${JSON.stringify({ nonce: challenge.nonce, status: patchproofStatus })}\\n`);",
+    `process.exit(${exitCodeExpression});`
+  ].join("\n");
 }
 
 async function createFixtureRepository(

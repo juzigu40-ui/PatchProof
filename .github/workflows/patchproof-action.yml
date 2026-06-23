@@ -61,9 +61,17 @@ jobs:
           exports.fixed = () => false;
           JS
           cat > reproduce.js <<'JS'
-          const { fixed } = require("./app.js");
-          const status = fixed() ? "assertion_passed" : "assertion_failed";
-          console.log(JSON.stringify({ nonce: process.env.PATCHPROOF_NONCE, status }));
+          const { spawnSync } = require("node:child_process");
+          const { readFileSync, writeFileSync } = require("node:fs");
+          const challenge = JSON.parse(readFileSync(3, "utf8"));
+          const targetScript = "const { fixed } = require(" + JSON.stringify("./app.js") + "); process.exit(fixed() ? 0 : 1);";
+          const target = spawnSync(process.execPath, ["-e", targetScript], {
+            cwd: process.cwd(),
+            encoding: "utf8",
+            env: { PATH: process.env.PATH || "" }
+          });
+          const status = target.status === 0 ? "assertion_passed" : "assertion_failed";
+          writeFileSync(4, `${JSON.stringify({ nonce: challenge.nonce, status })}\n`);
           process.exit(status === "assertion_passed" ? 0 : 1);
           JS
           cat > test.js <<'JS'

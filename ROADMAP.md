@@ -6,7 +6,7 @@
 - Linux and macOS support.
 - Node.js and Python repository support.
 - Git worktree isolation for base and head refs.
-- Trusted reproduction harness manifests and nonce-bound structured reproduction results.
+- Trusted reproduction harness manifests and fd-based nonce-bound structured reproduction results.
 - Deterministic proof files validated against `proof.schema.json`.
 - Optional Codex evidence summarization that cannot alter verdicts.
 

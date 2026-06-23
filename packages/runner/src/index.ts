@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { closeSync, openSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -25,6 +26,13 @@ export interface RunCommandOptions {
   timeoutMs: number;
   outputLimitBytes: number;
   env?: NodeJS.ProcessEnv;
+  extraFiles?: readonly RunCommandExtraFile[];
+}
+
+export interface RunCommandExtraFile {
+  fd: number;
+  path: string;
+  flags: "r" | "w";
 }
 
 export interface CreateCommandEnvironmentOptions {
@@ -80,15 +88,31 @@ export async function runCommand(options: RunCommandOptions): Promise<CommandRes
   const started = process.hrtime.bigint();
   const stdout = createLimitedCapture(options.outputLimitBytes);
   const stderr = createLimitedCapture(options.outputLimitBytes);
+  const openedFiles: number[] = [];
 
   return await new Promise((resolve) => {
+    const stdio: ("ignore" | "pipe" | number)[] = ["ignore", "pipe", "pipe"];
+    for (const file of options.extraFiles ?? []) {
+      if (file.fd < 3) {
+        throw new Error("extra file descriptors must be 3 or greater");
+      }
+      const opened = openSync(file.path, file.flags);
+      openedFiles.push(opened);
+      while (stdio.length <= file.fd) {
+        stdio.push("ignore");
+      }
+      stdio[file.fd] = opened;
+    }
+
     const child = spawn(options.command, {
       cwd: options.cwd,
       env: options.env ?? createCommandEnvironment(),
       detached: process.platform !== "win32",
       shell: true,
+      stdio,
       windowsHide: true
     });
+    closeOpenedFiles(openedFiles);
 
     let timedOut = false;
     const timeout = setTimeout(() => {
@@ -100,14 +124,15 @@ export async function runCommand(options: RunCommandOptions): Promise<CommandRes
     }, options.timeoutMs);
     timeout.unref();
 
-    child.stdout.on("data", (chunk: Buffer) => stdout.append(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk));
+    child.stdout?.on("data", (chunk: Buffer) => stdout.append(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => stderr.append(chunk));
 
     child.on("error", (error) => {
       stderr.append(Buffer.from(error.message));
     });
 
     child.on("close", (exitCode, signal) => {
+      closeOpenedFiles(openedFiles);
       clearTimeout(timeout);
       const finished = process.hrtime.bigint();
       resolve({
@@ -124,6 +149,20 @@ export async function runCommand(options: RunCommandOptions): Promise<CommandRes
       });
     });
   });
+}
+
+function closeOpenedFiles(openedFiles: number[]): void {
+  while (openedFiles.length > 0) {
+    const fd = openedFiles.pop();
+    if (fd === undefined) {
+      continue;
+    }
+    try {
+      closeSync(fd);
+    } catch {
+      // The descriptor may already be closed after spawn setup or error handling.
+    }
+  }
 }
 
 function killProcessTree(pid: number | undefined, signal: NodeJS.Signals): void {

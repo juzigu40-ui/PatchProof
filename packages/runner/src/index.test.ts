@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -30,6 +30,30 @@ describe("runner", () => {
     });
 
     expect(result.timedOut).toBe(true);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("passes verifier-owned file descriptors to commands", async () => {
+    const dir = await temporaryDirectory();
+    const challenge = join(dir, "challenge.json");
+    const resultPath = join(dir, "result.json");
+    await writeFile(challenge, '{"nonce":"n1"}\n', "utf8");
+    await writeFile(resultPath, "", "utf8");
+
+    const result = await runCommand({
+      command:
+        "node -e \"const fs=require('node:fs'); const c=JSON.parse(fs.readFileSync(3,'utf8')); fs.writeFileSync(4, JSON.stringify({ nonce: c.nonce, status: 'assertion_passed' }) + '\\n');\"",
+      cwd: dir,
+      extraFiles: [
+        { fd: 3, flags: "r", path: challenge },
+        { fd: 4, flags: "w", path: resultPath }
+      ],
+      outputLimitBytes: 1024,
+      timeoutMs: 5000
+    });
+
+    await expect(readFile(resultPath, "utf8")).resolves.toContain('"nonce":"n1"');
+    expect(result.exitCode).toBe(0);
     await rm(dir, { recursive: true, force: true });
   });
 
