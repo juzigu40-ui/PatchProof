@@ -1,0 +1,11 @@
+version: 1
+commands:
+  reproduce:
+    runtime: node
+    harness_root: .github/patchproof-pr-harness
+    entrypoint: reproduce.mjs
+    expected_exit_code:
+      base: 1
+      head: 0
+  test:
+    run: node -e "process.exit(0)"

@@ -102,5 +102,6 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: ./packages/github-action
         with:
+          config: .github/patchproof-pr-smoke.yml
           base-ref: ${{ github.event.pull_request.base.sha }}
           head-ref: ${{ github.event.pull_request.head.sha }}
