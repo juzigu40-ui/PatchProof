@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { nodeAdapter } from "@patchproof/adapters-node";
 import { pythonAdapter } from "@patchproof/adapters-python";
+import { writeInitialConfig } from "@patchproof/config";
 import { loadProof, VerificationRuntimeError, verifyPatchProof } from "./verify.js";
 
 const execFileAsync = promisify(execFile);
@@ -36,6 +37,48 @@ describe("verifyPatchProof", () => {
       verdict: { status: "verified" }
     });
     await rm(repo.path, { recursive: true, force: true });
+  });
+
+  it("verifies after patchproof init creates the default fd-aware harness", async () => {
+    const repoPath = await mkdtemp(join(tmpdir(), "patchproof-init-flow-"));
+    await execFileAsync("git", ["init", "--initial-branch=main"], { cwd: repoPath });
+    await execFileAsync("git", ["config", "user.name", "PatchProof Test"], { cwd: repoPath });
+    await execFileAsync("git", ["config", "user.email", "test@patchproof.local"], {
+      cwd: repoPath
+    });
+    await writeInitialConfig(repoPath);
+    await writeFile(join(repoPath, "app.mjs"), "export const fixed = () => false;\n", "utf8");
+    await writeFile(
+      join(repoPath, ".patchproof/repro-target.mjs"),
+      "import { fixed } from '../app.mjs';\nprocess.exit(fixed() ? 0 : 1);\n",
+      "utf8"
+    );
+    await writeFile(
+      join(repoPath, ".patchproof/test-target.mjs"),
+      "import { fixed } from '../app.mjs';\nprocess.exit(fixed() ? 0 : 1);\n",
+      "utf8"
+    );
+    await execFileAsync("git", ["add", "."], { cwd: repoPath });
+    await execFileAsync("git", ["commit", "-m", "base"], { cwd: repoPath });
+    const baseSha = await revParse(repoPath, "HEAD");
+
+    await writeFile(join(repoPath, "app.mjs"), "export const fixed = () => true;\n", "utf8");
+    await execFileAsync("git", ["add", "."], { cwd: repoPath });
+    await execFileAsync("git", ["commit", "-m", "head"], { cwd: repoPath });
+    const headSha = await revParse(repoPath, "HEAD");
+
+    const result = await verifyPatchProof({
+      baseRef: baseSha,
+      headRef: headSha,
+      repoPath
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.proof.verdict.status).toBe("verified");
+    expect(result.proof.commands.reproduction.base.command).toContain(
+      ".patchproof/harness/reproduce.mjs"
+    );
+    await rm(repoPath, { recursive: true, force: true });
   });
 
   it("wraps runtime failures as configuration or runtime errors", async () => {
@@ -103,13 +146,13 @@ describe("verifyPatchProof", () => {
     const repo = await createRepositoryFromFiles(
       {
         "patchproof.yml": trustedConfig(),
-        "reproduce.js": stateFileHarness("console.error('bug reproduced');"),
+        ".patchproof/harness/reproduce.js": stateFileHarness("console.error('bug reproduced');"),
         "state.txt": "broken\n",
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       },
       {
         "patchproof.yml": trustedConfig({ headExpectedExitCode: 1 }),
-        "reproduce.js": stateFileHarness("console.error('bug reproduced');"),
+        ".patchproof/harness/reproduce.js": stateFileHarness("console.error('bug reproduced');"),
         "state.txt": "broken\n",
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       }
@@ -139,7 +182,7 @@ describe("verifyPatchProof", () => {
       },
       {
         "patchproof.yml": trustedConfig(),
-        "reproduce.js": "console.log('pretend fixed'); process.exit(0);\n",
+        ".patchproof/harness/reproduce.js": "console.log('pretend fixed'); process.exit(0);\n",
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       }
     );
@@ -159,13 +202,13 @@ describe("verifyPatchProof", () => {
       {
         "patchproof.yml": trustedConfig(),
         "app.js": "exports.fixed = () => false;\n",
-        "reproduce.js": subprocessFixedHarness(),
+        ".patchproof/harness/reproduce.js": subprocessFixedHarness(),
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       },
       {
         "patchproof.yml": trustedConfig(),
         "app.js": "exports.fixed = () => false;\n",
-        "reproduce.js": fdStructuredReproduce(
+        ".patchproof/harness/reproduce.js": fdStructuredReproduce(
           "assertion_passed",
           "console.log('pretend fixed without testing app.js');"
         ),
@@ -187,23 +230,53 @@ describe("verifyPatchProof", () => {
     await rm(repo.path, { recursive: true, force: true });
   });
 
+  it("does not execute a head-controlled launcher outside the trusted harness entrypoint", async () => {
+    const repo = await createRepositoryFromFiles(
+      {
+        "patchproof.yml": trustedConfig(),
+        "app.js": "exports.fixed = () => false;\n",
+        ".patchproof/harness/reproduce.js": subprocessFixedHarness(),
+        "launcher.js": "console.log('base launcher should not run'); process.exit(1);\n",
+        "test.js": "console.log('tests pass'); process.exit(0);\n"
+      },
+      {
+        "patchproof.yml": trustedConfig(),
+        "app.js": "exports.fixed = () => false;\n",
+        ".patchproof/harness/reproduce.js": subprocessFixedHarness(),
+        "launcher.js": fdStructuredReproduce(
+          "assertion_passed",
+          "console.log('head launcher forged success');"
+        ),
+        "test.js": "console.log('tests pass'); process.exit(0);\n"
+      }
+    );
+
+    const result = await verifyPatchProof({
+      baseRef: repo.baseSha,
+      headRef: repo.headSha,
+      repoPath: repo.path
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.proof.commands.reproduction.head.command).toContain(
+      ".patchproof/harness/reproduce.js"
+    );
+    expect(result.proof.commands.reproduction.head.stdout).not.toContain("head launcher");
+    expect(result.proof.determinations.fixed_on_head).toBe(false);
+    await rm(repo.path, { recursive: true, force: true });
+  });
+
   it("treats missing structured reproduction output as an infrastructure error", async () => {
     const repo = await createRepositoryFromFiles(
       {
-        "patchproof.yml": trustedConfig({
-          reproduceRun: "npm run repro",
-          harnessFiles: ["package.json"]
-        }),
-        "package.json": JSON.stringify({ type: "module", scripts: {} }, null, 2),
+        "patchproof.yml": trustedConfig(),
+        ".patchproof/harness/reproduce.js": "process.exit(1);\n",
         "app.js": "export const value = 1;\n",
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       },
       {
-        "patchproof.yml": trustedConfig({
-          reproduceRun: "npm run repro",
-          harnessFiles: ["package.json"]
-        }),
-        "package.json": JSON.stringify({ type: "module", scripts: {} }, null, 2),
+        "patchproof.yml": trustedConfig(),
+        ".patchproof/harness/reproduce.js": "process.exit(1);\n",
         "app.js": "export const value = 2;\n",
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       }
@@ -218,7 +291,7 @@ describe("verifyPatchProof", () => {
     expect(result.exitCode).toBe(1);
     expect(result.proof.commands.reproduction.base.infrastructure_error).toBe(true);
     expect(result.proof.commands.reproduction.base.infrastructure_error_reason).toBe(
-      "missing_command_or_file"
+      "structured_result_missing"
     );
     expect(result.proof.verdict.reason).toContain("infrastructure error");
     await rm(repo.path, { recursive: true, force: true });
@@ -230,13 +303,13 @@ describe("verifyPatchProof", () => {
       {
         "patchproof.yml": trustedConfig(),
         "state.txt": "broken\n",
-        "reproduce.js": reproduce,
+        ".patchproof/harness/reproduce.js": reproduce,
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       },
       {
         "patchproof.yml": trustedConfig(),
         "state.txt": "fixed\n",
-        "reproduce.js": reproduce,
+        ".patchproof/harness/reproduce.js": reproduce,
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       }
     );
@@ -257,33 +330,42 @@ describe("verifyPatchProof", () => {
     await rm(repo.path, { recursive: true, force: true });
   });
 
-  it("rejects trusted harness manifests with unlisted helper dependencies", async () => {
+  it("detects dynamic helper changes by hashing the complete harness tree", async () => {
     const repo = await createRepositoryFromFiles(
       {
         "patchproof.yml": trustedConfig(),
-        "oracle.js": "exports.status = () => 'assertion_failed';\n",
-        "reproduce.js": "const { status } = require('./oracle.js');\n" + fdHarnessBody("status()"),
+        ".patchproof/harness/oracle.js": "exports.status = () => 'assertion_failed';\n",
+        ".patchproof/harness/reproduce.js":
+          "const helper = './' + 'oracle.js';\nconst { status } = require(helper);\n" +
+          fdHarnessBody("status()"),
         "test.js": "console.log('base tests pass'); process.exit(0);\n"
       },
       {
         "patchproof.yml": trustedConfig(),
-        "oracle.js": "exports.status = () => 'assertion_passed';\n",
-        "reproduce.js": "const { status } = require('./oracle.js');\n" + fdHarnessBody("status()"),
+        ".patchproof/harness/oracle.js": "exports.status = () => 'assertion_passed';\n",
+        ".patchproof/harness/reproduce.js":
+          "const helper = './' + 'oracle.js';\nconst { status } = require(helper);\n" +
+          fdHarnessBody("status()"),
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       }
     );
 
-    await expect(
-      verifyPatchProof({
-        baseRef: repo.baseSha,
-        headRef: repo.headSha,
-        repoPath: repo.path
-      })
-    ).rejects.toMatchObject({
-      originalError: expect.objectContaining({
-        message: expect.stringContaining("Trusted harness manifest is incomplete")
-      })
+    const result = await verifyPatchProof({
+      baseRef: repo.baseSha,
+      headRef: repo.headSha,
+      repoPath: repo.path
     });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.proof.harness.changed).toBe(true);
+    expect(result.proof.harness.files.map((file) => file.path)).toEqual([
+      ".patchproof/harness/oracle.js",
+      ".patchproof/harness/reproduce.js"
+    ]);
+    expect(result.proof.commands.reproduction.head.structured_result?.status).toBe(
+      "assertion_failed"
+    );
+    expect(result.proof.determinations.fixed_on_head).toBe(false);
     await rm(repo.path, { recursive: true, force: true });
   });
 
@@ -292,7 +374,7 @@ describe("verifyPatchProof", () => {
       {
         "patchproof.yml": trustedConfig(),
         "app.js": "console.log('fixed=false');\nexports.fixed = () => false;\n",
-        "reproduce.js": subprocessFixedHarness(),
+        ".patchproof/harness/reproduce.js": subprocessFixedHarness(),
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       },
       {
@@ -302,7 +384,7 @@ describe("verifyPatchProof", () => {
           "console.log('fixed=false');",
           "exports.fixed = () => false;"
         ].join("\n"),
-        "reproduce.js": subprocessFixedHarness(),
+        ".patchproof/harness/reproduce.js": subprocessFixedHarness(),
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       }
     );
@@ -327,13 +409,13 @@ describe("verifyPatchProof", () => {
       {
         "patchproof.yml": trustedConfig(),
         "app.js": "exports.fixed = () => false;\n",
-        "reproduce.js": subprocessFixedHarness(),
+        ".patchproof/harness/reproduce.js": subprocessFixedHarness(),
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       },
       {
         "patchproof.yml": trustedConfig(),
         "app.js": "exports.fixed = () => process.env.PATCHPROOF_STAGE === 'head-reproduce';\n",
-        "reproduce.js": subprocessFixedHarness(),
+        ".patchproof/harness/reproduce.js": subprocessFixedHarness(),
         "test.js": "console.log('tests pass'); process.exit(0);\n"
       }
     );
@@ -359,7 +441,7 @@ describe("verifyPatchProof", () => {
       {
         "patchproof.yml": trustedConfig(),
         "state.txt": "broken\n",
-        "reproduce.js": stateFileHarness(
+        ".patchproof/harness/reproduce.js": stateFileHarness(
           "console.log('head secret=' + (process.env.TOP_SECRET || 'unset'));"
         ),
         "test.js": "console.log('test secret=' + (process.env.TOP_SECRET || 'unset'));\n"
@@ -369,7 +451,7 @@ describe("verifyPatchProof", () => {
           extraLines: ["runtime:", "  env_passthrough:", "    - TOP_SECRET"]
         }),
         "state.txt": "fixed\n",
-        "reproduce.js": stateFileHarness(
+        ".patchproof/harness/reproduce.js": stateFileHarness(
           "console.log('head secret=' + (process.env.TOP_SECRET || 'unset'));"
         ),
         "test.js": "console.log('test secret=' + (process.env.TOP_SECRET || 'unset'));\n"
@@ -401,18 +483,22 @@ describe("verifyPatchProof", () => {
 function trustedConfig(
   options: {
     extraLines?: string[];
-    harnessFiles?: string[];
     headExpectedExitCode?: number;
-    reproduceRun?: string;
+    reproduceArgs?: string[];
+    runtime?: "node" | "python";
   } = {}
 ): string {
+  const reproduceArgs = options.reproduceArgs ?? [];
   return [
     "version: 1",
     "commands:",
     "  reproduce:",
-    `    run: ${options.reproduceRun ?? "node reproduce.js"}`,
-    "    harness_files:",
-    ...(options.harnessFiles ?? ["reproduce.js"]).map((file) => `      - ${file}`),
+    `    runtime: ${options.runtime ?? "node"}`,
+    "    harness_root: .patchproof/harness",
+    "    entrypoint: reproduce.js",
+    ...(reproduceArgs.length > 0
+      ? ["    args:", ...reproduceArgs.map((arg) => `      - ${JSON.stringify(arg)}`)]
+      : []),
     "    expected_exit_code:",
     "      base: 1",
     `      head: ${options.headExpectedExitCode ?? 0}`,

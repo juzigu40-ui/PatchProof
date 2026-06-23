@@ -1,13 +1,19 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import {
   ConfigError,
   createDefaultConfig,
+  DEFAULT_HARNESS_ENTRYPOINT,
+  DEFAULT_HARNESS_ROOT,
+  DEFAULT_REPRO_TARGET,
+  DEFAULT_TEST_TARGET,
   formatDefaultConfig,
   getGitBlobSha,
+  getGitTreeSha,
+  listGitTreeFiles,
   loadPatchProofConfigFromGit,
   loadPatchProofConfig,
   normalizeRelativePath,
@@ -24,10 +30,14 @@ describe("config", () => {
   it("creates a default config that validates", () => {
     const config = createDefaultConfig();
     expect(PatchProofConfigSchema.parse(config).version).toBe(1);
-    expect(config.commands.reproduce.harness_files).toEqual(["patchproof.yml"]);
+    expect(config.commands.reproduce.runtime).toBe("node");
+    expect(config.commands.reproduce.harness_root).toBe(DEFAULT_HARNESS_ROOT);
+    expect(config.commands.reproduce.entrypoint).toBe(DEFAULT_HARNESS_ENTRYPOINT);
+    expect(config.commands.reproduce.args).toEqual(["node", DEFAULT_REPRO_TARGET]);
     expect(config.commands.reproduce.expected_exit_code.base).toBe(1);
     expect(config.commands.reproduce.expected_exit_code.head).toBe(0);
     expect(config.commands.test.expected_exit_code).toBe(0);
+    expect(config.commands.test.run).toBe(`node ${DEFAULT_TEST_TARGET}`);
   });
 
   it("loads yaml and applies defaults", async () => {
@@ -38,9 +48,9 @@ describe("config", () => {
         "version: 1",
         "commands:",
         "  reproduce:",
-        "    run: node reproduce.js",
-        "    harness_files:",
-        "      - reproduce.js",
+        "    runtime: node",
+        "    harness_root: .patchproof/harness",
+        "    entrypoint: reproduce.mjs",
         "  test:",
         "    run: node test.js"
       ].join("\n"),
@@ -71,9 +81,9 @@ describe("config", () => {
         "version: 1",
         "commands:",
         "  reproduce:",
-        "    run: node reproduce.js",
-        "    harness_files:",
-        "      - reproduce.js",
+        "    runtime: node",
+        "    harness_root: .patchproof/harness",
+        "    entrypoint: reproduce.mjs",
         "  test:",
         "    run: node test.js",
         "runtime:",
@@ -100,15 +110,19 @@ describe("config", () => {
         "version: 1",
         "commands:",
         "  reproduce:",
-        "    run: node reproduce.js",
-        "    harness_files:",
-        "      - reproduce.js",
+        "    runtime: node",
+        "    harness_root: .patchproof/harness",
+        "    entrypoint: reproduce.mjs",
         "  test:",
         "    run: node test.js"
       ].join("\n"),
       "utf8"
     );
-    await execFileAsync("git", ["add", "patchproof.yml"], { cwd: dir });
+    await mkdir(join(dir, ".patchproof/harness"), { recursive: true });
+    await writeFile(join(dir, ".patchproof/harness/reproduce.mjs"), "process.exit(0);\n", "utf8");
+    await execFileAsync("git", ["add", "patchproof.yml", ".patchproof/harness/reproduce.mjs"], {
+      cwd: dir
+    });
     await execFileAsync("git", ["commit", "-m", "config"], { cwd: dir });
     const sha = await revParse(dir, "HEAD");
 
@@ -122,7 +136,13 @@ describe("config", () => {
       "version: 1"
     );
     await expect(tryGetGitBlobSha(dir, sha, "missing.yml")).resolves.toBeNull();
-    expect(loaded.config.commands.reproduce.run).toBe("node reproduce.js");
+    expect(loaded.config.commands.reproduce.entrypoint).toBe("reproduce.mjs");
+    await expect(getGitTreeSha(dir, sha, ".patchproof/harness")).resolves.toMatch(
+      /^[0-9a-f]{40,64}$/
+    );
+    await expect(listGitTreeFiles(dir, sha, ".patchproof/harness")).resolves.toEqual([
+      ".patchproof/harness/reproduce.mjs"
+    ]);
     await rm(dir, { recursive: true, force: true });
   });
 
@@ -160,8 +180,9 @@ describe("config", () => {
         version: 1,
         commands: {
           reproduce: {
-            run: "node reproduce.js",
-            harness_files: ["../reproduce.js"]
+            runtime: "node",
+            harness_root: "../harness",
+            entrypoint: "reproduce.mjs"
           },
           test: {
             run: "node test.js"
@@ -207,8 +228,18 @@ describe("config", () => {
 
     const written = await writeInitialConfig(dir);
     const raw = await readFile(written, "utf8");
+    const harness = await readFile(
+      join(dir, DEFAULT_HARNESS_ROOT, DEFAULT_HARNESS_ENTRYPOINT),
+      "utf8"
+    );
+    const target = await readFile(join(dir, DEFAULT_REPRO_TARGET), "utf8");
+    const testTarget = await readFile(join(dir, DEFAULT_TEST_TARGET), "utf8");
 
     expect(raw).toBe(formatDefaultConfig());
+    expect(harness).toContain("readFileSync(3");
+    expect(harness).toContain("writeFileSync(4");
+    expect(target).toContain("Configure .patchproof/repro-target.mjs");
+    expect(testTarget).toContain("Configure .patchproof/test-target.mjs");
     await expect(writeInitialConfig(dir)).rejects.toBeInstanceOf(ConfigError);
     await rm(dir, { recursive: true, force: true });
   });

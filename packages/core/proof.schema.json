@@ -52,8 +52,13 @@
     "harness": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["files", "changed"],
+      "required": ["root", "base_tree_sha", "head_tree_sha", "files", "changed"],
       "properties": {
+        "root": { "type": "string" },
+        "base_tree_sha": { "type": "string" },
+        "head_tree_sha": {
+          "anyOf": [{ "type": "string" }, { "type": "null" }]
+        },
         "files": {
           "type": "array",
           "items": { "$ref": "#/$defs/harnessFile" }

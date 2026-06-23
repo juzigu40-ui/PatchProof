@@ -1,12 +1,9 @@
 version: 1
 commands:
   reproduce:
-    run:
-      'node -e "const fs = require(''node:fs''); const challenge = JSON.parse(fs.readFileSync(3,
-      ''utf8'')); fs.writeFileSync(4, JSON.stringify({ nonce: challenge.nonce, status:
-      ''assertion_passed'' }) + ''\n''); process.exit(0);"'
-    harness_files:
-      - patchproof.yml
+    runtime: node
+    harness_root: .patchproof/harness
+    entrypoint: smoke.mjs
     expected_exit_code:
       base: 0
       head: 0

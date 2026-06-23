@@ -80,7 +80,10 @@ function sampleProof(): Proof {
       tests_passed: false
     },
     harness: {
+      base_tree_sha: "base-tree",
       changed: false,
+      head_tree_sha: "base-tree",
+      root: ".patchproof/harness",
       files: [
         {
           base_blob_sha: "base-harness",

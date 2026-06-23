@@ -1,9 +1,9 @@
 version: 1
 commands:
   reproduce:
-    run: python3 reproduce.py
-    harness_files:
-      - reproduce.py
+    runtime: python
+    harness_root: .patchproof/harness
+    entrypoint: reproduce.py
     expected_exit_code:
       base: 1
       head: 0

@@ -56,6 +56,9 @@ async function initCommand(args: readonly string[], io: CliIO): Promise<number> 
   const configPath = parsed.values.config ?? DEFAULT_CONFIG_FILE;
   const path = await writeInitialConfig(process.cwd(), configPath);
   io.stdout.write(`Created ${path}\n`);
+  io.stdout.write("Created .patchproof/harness/reproduce.mjs\n");
+  io.stdout.write("Created .patchproof/repro-target.mjs\n");
+  io.stdout.write("Created .patchproof/test-target.mjs\n");
   return 0;
 }
 

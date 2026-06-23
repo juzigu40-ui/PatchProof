@@ -22,11 +22,14 @@ export interface CommandResult {
 
 export interface RunCommandOptions {
   command: string;
+  args?: readonly string[];
   cwd: string;
   timeoutMs: number;
   outputLimitBytes: number;
+  displayCommand?: string;
   env?: NodeJS.ProcessEnv;
   extraFiles?: readonly RunCommandExtraFile[];
+  shell?: boolean;
 }
 
 export interface RunCommandExtraFile {
@@ -104,11 +107,11 @@ export async function runCommand(options: RunCommandOptions): Promise<CommandRes
       stdio[file.fd] = opened;
     }
 
-    const child = spawn(options.command, {
+    const child = spawn(options.command, options.args ? [...options.args] : [], {
       cwd: options.cwd,
       env: options.env ?? createCommandEnvironment(),
       detached: process.platform !== "win32",
-      shell: true,
+      shell: options.shell ?? options.args === undefined,
       stdio,
       windowsHide: true
     });
@@ -136,7 +139,7 @@ export async function runCommand(options: RunCommandOptions): Promise<CommandRes
       clearTimeout(timeout);
       const finished = process.hrtime.bigint();
       resolve({
-        command: options.command,
+        command: options.displayCommand ?? formatCommand(options.command, options.args),
         cwd: options.cwd,
         exitCode,
         signal,
@@ -149,6 +152,20 @@ export async function runCommand(options: RunCommandOptions): Promise<CommandRes
       });
     });
   });
+}
+
+function formatCommand(command: string, args: readonly string[] | undefined): string {
+  if (!args || args.length === 0) {
+    return command;
+  }
+  return [command, ...args].map(shellQuote).join(" ");
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:=@+-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function closeOpenedFiles(openedFiles: number[]): void {

@@ -42,6 +42,9 @@ export function renderMarkdownReport(proof: Proof): string {
     "",
     "## Harness",
     "",
+    `- root: ${validProof.harness.root}`,
+    `- base_tree_sha: ${validProof.harness.base_tree_sha}`,
+    `- head_tree_sha: ${validProof.harness.head_tree_sha ?? "null"}`,
     `- changed: ${validProof.harness.changed}`,
     ...validProof.harness.files.map(
       (file) =>

@@ -32,17 +32,18 @@ PatchProof is currently a cooperative alpha. It does not yet provide a security 
 malicious pull-request code. Run it only on ephemeral GitHub-hosted runners with read-only
 permissions and no secrets.
 
-Minimal reproduction commands must use a trusted harness file listed in base config. The harness
-reads a verifier challenge from file descriptor 3 and writes exactly one nonce-bound structured
-result line to file descriptor 4. `stdout` and `stderr` are captured only as logs:
+Minimal reproduction checks run through a trusted harness tree from the base commit. PatchProof
+exports that tree outside the head worktree and directly launches the configured entrypoint. The
+harness reads a verifier challenge from file descriptor 3 and writes exactly one nonce-bound
+structured result line to file descriptor 4. `stdout` and `stderr` are captured only as logs:
 
 ```yaml
 version: 1
 commands:
   reproduce:
-    run: node reproduce.js
-    harness_files:
-      - reproduce.js
+    runtime: node
+    harness_root: .patchproof/harness
+    entrypoint: reproduce.js
     expected_exit_code:
       base: 1
       head: 0

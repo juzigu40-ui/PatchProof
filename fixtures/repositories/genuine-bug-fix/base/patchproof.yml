@@ -1,9 +1,9 @@
 version: 1
 commands:
   reproduce:
-    run: node reproduce.js
-    harness_files:
-      - reproduce.js
+    runtime: node
+    harness_root: .patchproof/harness
+    entrypoint: reproduce.js
     expected_exit_code:
       base: 1
       head: 0

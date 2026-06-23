@@ -48,9 +48,9 @@ jobs:
           version: 1
           commands:
             reproduce:
-              run: node reproduce.js
-              harness_files:
-                - reproduce.js
+              runtime: node
+              harness_root: .patchproof/harness
+              entrypoint: reproduce.js
               expected_exit_code:
                 base: 1
                 head: 0
@@ -60,7 +60,8 @@ jobs:
           cat > app.js <<'JS'
           exports.fixed = () => false;
           JS
-          cat > reproduce.js <<'JS'
+          mkdir -p .patchproof/harness
+          cat > .patchproof/harness/reproduce.js <<'JS'
           const { spawnSync } = require("node:child_process");
           const { readFileSync, writeFileSync } = require("node:fs");
           const challenge = JSON.parse(readFileSync(3, "utf8"));

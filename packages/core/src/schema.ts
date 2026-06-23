@@ -70,6 +70,9 @@ export const ProofSchema = z
     config_path: z.string(),
     harness: z
       .object({
+        root: z.string(),
+        base_tree_sha: z.string(),
+        head_tree_sha: z.string().nullable(),
         files: z.array(HarnessFileSchema),
         changed: z.boolean()
       })

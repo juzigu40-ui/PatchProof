@@ -20,16 +20,17 @@ The v0.1 verifier reads `patchproof.yml` from the trusted base commit, not from 
 head. The proof records the trusted config path, source commit, blob SHA, and whether the head
 commit changed the policy file.
 
-The base config must list `commands.reproduce.harness_files`. The list is the trusted harness
-closure: helper files imported by the harness must also be listed. PatchProof records each trusted
-harness file's base and head Git blob SHA. Head changes to those files set `harness_changed` and
-block a verified verdict. For head reproduction, PatchProof overwrites the listed harness files with
-the base commit versions before executing the command.
+The base config must name a trusted reproduction harness tree with `commands.reproduce.harness_root`
+and an `entrypoint` inside that tree. PatchProof records the base and head Git tree SHA for the
+harness root and each file's Git blob SHA. Head changes anywhere in the harness tree set
+`harness_changed` and block a verified verdict. For reproduction stages, PatchProof exports the base
+commit's complete harness tree to a verifier-owned directory outside the worktree and directly
+launches the configured entrypoint without a shell.
 
 It then runs each stage in sequence:
 
-1. the reproduction command in a base-only disposable worktree,
-2. the reproduction command in a head-only disposable worktree,
+1. the trusted harness entrypoint in a base-only disposable worktree,
+2. the trusted harness entrypoint in a head-only disposable worktree,
 3. the test command in a separate head-only disposable worktree.
 
 Later worktrees are not created until earlier command processes have exited and their temporary

@@ -45,8 +45,9 @@ PatchProof reads `patchproof.yml` from the base commit for the current verdict a
 trusted config blob SHA in `proof.json`; policy edits in the pull request are reported as
 `policy_changed`.
 
-The base config must list trusted reproduction harness files under
-`commands.reproduce.harness_files`, including trusted helper files. Reproduction commands read the
+The base config must name a trusted reproduction harness tree with `commands.reproduce.harness_root`
+and an `entrypoint`. PatchProof records the harness root tree SHA, exports the base tree outside the
+pull request worktree, and directly launches the entrypoint. Reproduction harnesses read the
 challenge from fd 3 and write one JSON result line to fd 4 with one of `assertion_failed`,
 `assertion_passed`, or `setup_error`. `stdout` is not used for the deterministic verdict.
 

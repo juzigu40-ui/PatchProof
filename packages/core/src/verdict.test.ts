@@ -211,9 +211,23 @@ describe("verdict", () => {
 
   it("treats missing or mismatched structured results as infrastructure errors", () => {
     expect(
-      parseStructuredReproductionResult(commandResult({ stdout: "plain output" }), "n1")
+      parseStructuredReproductionResult(commandResult({ stdout: "" }), "n1")
         .infrastructureErrorReason
     ).toBe("structured_result_missing");
+    expect(
+      parseStructuredReproductionResult(commandResult({ stdout: "plain output" }), "n1")
+        .infrastructureErrorReason
+    ).toBe("structured_result_invalid");
+    expect(
+      parseStructuredReproductionResult(
+        `${JSON.stringify({ nonce: "n1", status: "assertion_failed" })}\ntrailing garbage`,
+        "n1"
+      ).infrastructureErrorReason
+    ).toBe("structured_result_ambiguous");
+    expect(parseStructuredReproductionResult("", "n1", "structured_result_too_large")).toEqual({
+      infrastructureErrorReason: "structured_result_too_large",
+      structuredResult: null
+    });
     expect(
       parseStructuredReproductionResult(
         commandResult({ stdout: JSON.stringify({ nonce: "wrong", status: "assertion_passed" }) }),

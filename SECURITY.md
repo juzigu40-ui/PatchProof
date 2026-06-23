@@ -25,8 +25,9 @@ PatchProof reads policy from the trusted base commit and records the config blob
 `runtime.env_passthrough` is disabled for untrusted verification; command phases run with a
 temporary `HOME` and restricted environment.
 
-Reproduction commands must use base-listed trusted harness files, including trusted helpers. The
-verifier sends the challenge over fd 3 and accepts the structured result only from fd 4; target
-`stdout` cannot determine the verdict. Head changes to trusted harness files block a verified
-verdict. Current v0.1 process isolation is not a container sandbox; hostile-code deployments should
-wait for container/cgroup isolation before treating verification as stable.
+Reproduction commands run through the trusted harness tree from the base commit. The verifier
+exports that tree outside the pull request worktree, sends the challenge over fd 3, and accepts the
+structured result only from fd 4; target `stdout` cannot determine the verdict. Head changes to the
+trusted harness tree block a verified verdict. Current v0.1 process isolation is not a container
+sandbox; hostile-code deployments should wait for container/cgroup isolation before treating
+verification as stable.

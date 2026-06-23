@@ -57,6 +57,39 @@ describe("runner", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it("runs direct commands with arguments without invoking a shell", async () => {
+    const dir = await temporaryDirectory();
+    const challenge = join(dir, "challenge.json");
+    const resultPath = join(dir, "result.json");
+    await writeFile(challenge, '{"nonce":"n2"}\n', "utf8");
+    await writeFile(resultPath, "", "utf8");
+
+    const script = [
+      "const fs = require('node:fs');",
+      "const c = JSON.parse(fs.readFileSync(3, 'utf8'));",
+      "process.stdout.write(process.argv.at(-1));",
+      "fs.writeFileSync(4, JSON.stringify({ nonce: c.nonce, status: 'assertion_passed' }) + '\\n');"
+    ].join("\n");
+    const result = await runCommand({
+      args: ["-e", script, "literal arg"],
+      command: process.execPath,
+      cwd: dir,
+      displayCommand: "node direct-test",
+      extraFiles: [
+        { fd: 3, flags: "r", path: challenge },
+        { fd: 4, flags: "w", path: resultPath }
+      ],
+      outputLimitBytes: 1024,
+      shell: false,
+      timeoutMs: 5000
+    });
+
+    expect(result.command).toBe("node direct-test");
+    expect(result.stdout).toBe("literal arg");
+    await expect(readFile(resultPath, "utf8")).resolves.toContain('"nonce":"n2"');
+    await rm(dir, { recursive: true, force: true });
+  });
+
   it("kills child processes when a command times out", async () => {
     const dir = await temporaryDirectory();
     const marker = join(dir, "orphan-evidence");

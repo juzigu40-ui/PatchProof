@@ -130,33 +130,39 @@ export function proofExitCode(proof: Proof): 0 | 1 {
 
 export function parseStructuredReproductionResult(
   result: CommandResult | string,
-  expectedNonce: string
+  expectedNonce: string,
+  infrastructureErrorReason: string | null = null
 ): { infrastructureErrorReason: string | null; structuredResult: StructuredResult | null } {
+  if (infrastructureErrorReason !== null) {
+    return {
+      infrastructureErrorReason,
+      structuredResult: null
+    };
+  }
+
   const text = typeof result === "string" ? result : `${result.stdout}\n${result.stderr}`;
-  const candidates = text
+  const lines = text
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line.startsWith("{") && line.endsWith("}"))
-    .map(parseStructuredResultLine)
-    .filter((candidate): candidate is StructuredResult => candidate !== null);
+    .filter(Boolean);
 
-  if (candidates.length === 0) {
+  if (lines.length === 0) {
     return {
       infrastructureErrorReason: "structured_result_missing",
       structuredResult: null
     };
   }
-  if (candidates.length > 1) {
+  if (lines.length > 1) {
     return {
       infrastructureErrorReason: "structured_result_ambiguous",
       structuredResult: null
     };
   }
 
-  const structuredResult = candidates[0];
+  const structuredResult = parseStructuredResultLine(lines[0] ?? "");
   if (!structuredResult) {
     return {
-      infrastructureErrorReason: "structured_result_missing",
+      infrastructureErrorReason: "structured_result_invalid",
       structuredResult: null
     };
   }
