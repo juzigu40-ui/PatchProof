@@ -97,3 +97,10 @@ jobs:
           repo-path: ${{ steps.fixture.outputs.repo }}
           base-ref: ${{ steps.fixture.outputs.base }}
           head-ref: ${{ steps.fixture.outputs.head }}
+
+      - name: PatchProof verify current pull request
+        if: github.event_name == 'pull_request'
+        uses: ./packages/github-action
+        with:
+          base-ref: ${{ github.event.pull_request.base.sha }}
+          head-ref: ${{ github.event.pull_request.head.sha }}
